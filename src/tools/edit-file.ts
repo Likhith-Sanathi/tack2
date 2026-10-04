@@ -30,7 +30,7 @@ export const editFile = defineTool({
 		new_string: z.string().describe('Replacement text'),
 		replace_all: z.boolean().optional().describe('Replace every occurrence (default false)'),
 	}),
-	requiresApproval: true,
+	kind: 'edit',
 	describe: args => args.path,
 	async preview(args, {cwd}) {
 		const {before, after} = await applyEdit(args, cwd);

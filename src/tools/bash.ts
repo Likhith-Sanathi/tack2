@@ -2,6 +2,7 @@ import {spawn} from 'node:child_process';
 import {z} from 'zod';
 import {defineTool} from './types.js';
 import {truncate} from './paths.js';
+import {commandScope} from '../agent/permissions.js';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -13,7 +14,8 @@ export const bash = defineTool({
 		command: z.string().describe('The shell command to run'),
 		timeout_ms: z.number().int().min(1000).max(600_000).optional().describe('Timeout (default 120000)'),
 	}),
-	requiresApproval: true,
+	kind: 'execute',
+	approvalScope: args => commandScope(args.command),
 	describe: args => args.command,
 	run({command, timeout_ms = DEFAULT_TIMEOUT_MS}, {cwd, signal, onOutput}) {
 		return new Promise((resolve, reject) => {

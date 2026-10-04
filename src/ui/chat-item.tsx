@@ -87,7 +87,7 @@ export function ChatItemView({
 			);
 		}
 		case 'tool': {
-			const color = {running: 'yellow', ok: 'green', error: 'red', denied: 'gray', interrupted: 'gray'}[item.status];
+			const color = {running: 'yellow', ok: 'green', error: 'red', denied: 'gray', blocked: 'gray', interrupted: 'gray'}[item.status];
 			return (
 				<Box marginTop={1} flexDirection="column">
 					<Box>

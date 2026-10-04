@@ -12,6 +12,7 @@ import {useAgent, type ChatItem} from './use-agent.js';
 const HELP = [
 	'Commands: /model (switch model), /compact (summarize to free context), /clear (new conversation), /help, /exit',
 	'Keys: Enter sends · Shift+Enter, Option+Enter, Ctrl+J or \\ then Enter adds a new line · ↑/↓ history',
+	'      Shift+Tab cycles permission modes: ask → auto-accept edits → plan (read-only)',
 	'      Esc interrupts the agent · Ctrl+C interrupts, clears the input, or quits when idle',
 ].join('\n');
 
@@ -60,7 +61,9 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	);
 
 	useInput((char, key) => {
-		if (key.escape) {
+		if (key.tab && key.shift) {
+			agent.cycleMode();
+		} else if (key.escape) {
 			if (agent.running) agent.interrupt();
 			else if (picking && model) setPicking(false);
 		} else if (key.ctrl && char === 'c') {
@@ -142,7 +145,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 								tack
 							</Text>
 							<Text dimColor>{cwd}</Text>
-							<Text dimColor>/help for commands · Shift/Option+Enter for a new line · Esc to interrupt</Text>
+							<Text dimColor>/help for commands · Shift+Tab to change permission mode · Esc to interrupt</Text>
 						</Box>
 					) : (
 						// Static output is laid out without a parent width, so give it one explicitly for wrapping.
@@ -192,6 +195,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 			<StatusBar
 				model={model}
 				activity={activity}
+				mode={agent.mode}
 				usage={agent.usage}
 				contextLength={modelInfo?.contextLength}
 			/>

@@ -18,7 +18,7 @@ export const search = defineTool({
 		glob: z.string().optional().describe('Only search files whose relative path matches this glob'),
 		ignore_case: z.boolean().optional(),
 	}),
-	requiresApproval: false,
+	kind: 'read',
 	describe: args => `/${args.pattern}/${args.glob ? ` in ${args.glob}` : ''}`,
 	async run({pattern, path = '.', glob, ignore_case}, {cwd, signal}) {
 		const root = resolveInCwd(cwd, path);

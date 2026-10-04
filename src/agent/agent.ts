@@ -1,8 +1,10 @@
 import {z} from 'zod';
 import type {AnyTool, ToolPreview} from '../tools/index.js';
+import {Permissions, type AlwaysOption, type PermissionMode, type ToolKind} from './permissions.js';
 import {ApiError, streamChat, type ChatMessage, type StreamResult, type ToolCall, type ToolSpec, type Usage} from './openrouter.js';
 
-export type ToolStatus = 'ok' | 'error' | 'denied' | 'interrupted';
+/** `blocked`: refused by the permission mode (the turn continues); `denied`: the user said no (it stops). */
+export type ToolStatus = 'ok' | 'error' | 'denied' | 'blocked' | 'interrupted';
 
 export type AgentEvent =
 	| {type: 'text'; delta: string}
@@ -12,12 +14,20 @@ export type AgentEvent =
 	| {type: 'tool_output'; id: string; chunk: string}
 	| {type: 'tool_end'; id: string; status: ToolStatus; result: string}
 	| {type: 'usage'; usage: Usage}
+	| {type: 'mode'; mode: PermissionMode}
 	/** Older messages were replaced by a summary; token counts are estimates. */
 	| {type: 'compacted'; before: number; after: number}
 	| {type: 'notice'; message: string}
 	| {type: 'error'; message: string};
 
-export type ApprovalRequest = {toolName: string; summary: string; preview?: ToolPreview};
+export type ApprovalRequest = {
+	toolName: string;
+	kind: ToolKind;
+	summary: string;
+	preview?: ToolPreview;
+	/** What "don't ask again" would allow; absent when the call can only be approved once. */
+	always?: AlwaysOption;
+};
 export type ApprovalDecision = 'once' | 'always' | 'deny';
 
 export type AgentOptions = {
@@ -37,6 +47,10 @@ const COMPACT_THRESHOLD = 0.75;
 const CHARS_PER_TOKEN = 4;
 /** Context size assumed when the model's is unknown (only used to cap the summary request). */
 const FALLBACK_CONTEXT = 32_000;
+
+const PLAN_MODE_NOTE =
+	'PLAN MODE IS ON: you may only read and search. Do not try to edit files or run commands; ' +
+	'investigate, then present a concrete plan and wait for the user to approve it.';
 
 function systemPrompt(cwd: string): string {
 	return [
@@ -110,7 +124,7 @@ export class Agent {
 	private summary = '';
 	/** Prompt tokens reported for the last request, and how many messages it contained. */
 	private lastPrompt = {tokens: 0, messageCount: 0};
-	private readonly alwaysAllowed = new Set<string>();
+	private readonly permissions = new Permissions();
 	private controller: AbortController | null = null;
 
 	constructor(private readonly options: AgentOptions) {
@@ -126,6 +140,17 @@ export class Agent {
 		return {role: 'system', content};
 	}
 
+	get mode(): PermissionMode {
+		return this.permissions.mode;
+	}
+
+	/** Changes the permission mode; applies from the next tool call. */
+	setMode(mode: PermissionMode): void {
+		if (mode === this.permissions.mode) return;
+		this.permissions.mode = mode;
+		this.emit({type: 'mode', mode});
+	}
+
 	get running(): boolean {
 		return this.controller !== null;
 	}
@@ -135,13 +160,13 @@ export class Agent {
 		this.controller?.abort();
 	}
 
-	/** Clears conversation history and session approvals. */
+	/** Clears conversation history and session approvals. The permission mode is kept. */
 	reset(): void {
 		this.interrupt();
 		this.summary = '';
 		this.messages = [this.systemMessage()];
 		this.lastPrompt = {tokens: 0, messageCount: 0};
-		this.alwaysAllowed.clear();
+		this.permissions.clearGrants();
 	}
 
 	/** Sends a user message and runs the agent loop until the turn ends. Never throws. */
@@ -240,7 +265,7 @@ export class Agent {
 				const result = await streamChat({
 					apiKey: this.options.apiKey,
 					model: this.model,
-					messages: this.messages,
+					messages: this.requestMessages(),
 					tools,
 					signal,
 					onText: delta => {
@@ -271,6 +296,13 @@ export class Agent {
 				await sleep(delay, signal);
 			}
 		}
+	}
+
+	/** The conversation as sent to the model, with a reminder of the mode when it restricts tools. */
+	private requestMessages(): ChatMessage[] {
+		if (this.permissions.mode !== 'plan') return this.messages;
+		const [system, ...rest] = this.messages;
+		return [{role: 'system', content: `${system!.content}\n\n${PLAN_MODE_NOTE}`}, ...rest];
 	}
 
 	/** Tokens the next request will use: the last reported count plus an estimate for newer messages. */
@@ -363,6 +395,12 @@ export class Agent {
 			signal,
 			onOutput: (chunk: string) => this.emit({type: 'tool_output', id: call.id, chunk}),
 		};
+		const permission = this.permissions.check(tool, args);
+		if (permission.behavior === 'deny') {
+			this.emit({type: 'tool_start', id: call.id, name, summary});
+			return finish('blocked', permission.reason);
+		}
+
 		let preview: ToolPreview | undefined;
 		try {
 			preview = await tool.preview?.(args, ctx);
@@ -373,14 +411,18 @@ export class Agent {
 		}
 		this.emit({type: 'tool_start', id: call.id, name, summary, preview});
 
-		if (tool.requiresApproval && !this.alwaysAllowed.has(name)) {
+		if (permission.behavior === 'ask') {
 			const decision = await Promise.race([
-				this.options.requestApproval({toolName: name, summary, preview}),
+				this.options.requestApproval({toolName: name, kind: tool.kind, summary, preview, always: permission.always}),
 				abortPromise(signal),
 			]);
 			if (decision === 'interrupted') return finish('interrupted', 'Interrupted by the user.');
 			if (decision === 'deny') return finish('denied', 'The user denied this action. Ask them how to proceed.');
-			if (decision === 'always') this.alwaysAllowed.add(name);
+			if (decision === 'always' && permission.always) {
+				const before = this.permissions.mode;
+				this.permissions.grant(permission.always);
+				if (this.permissions.mode !== before) this.emit({type: 'mode', mode: this.permissions.mode});
+			}
 		}
 
 		try {

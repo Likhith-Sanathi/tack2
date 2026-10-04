@@ -12,7 +12,7 @@ export const readFile = defineTool({
 		offset: z.number().int().min(1).optional().describe('1-based line to start at'),
 		limit: z.number().int().min(1).optional().describe('Maximum number of lines (default 2000)'),
 	}),
-	requiresApproval: false,
+	kind: 'read',
 	describe: args => args.path,
 	async run({path, offset = 1, limit = 2000}, {cwd}) {
 		const text = await fs.readFile(resolveInCwd(cwd, path), 'utf8');

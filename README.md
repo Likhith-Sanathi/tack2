@@ -36,12 +36,29 @@ On first launch you pick a model. The list shows OpenRouter models that support 
 | `Enter` | Send |
 | `Shift+Enter`, `Option/Alt+Enter`, `Ctrl+J`, or `\` then `Enter` | New line (Shift+Enter needs a terminal with the kitty keyboard protocol, e.g. kitty, Ghostty, WezTerm, iTerm2) |
 | `↑` / `↓` | Move between lines; at the first/last line, browse previous prompts |
+| `Shift+Tab` | Cycle permission modes: ask → auto-accept edits → plan |
 | `Esc` | Interrupt the running generation or tool call |
 | `Ctrl+C` | Interrupt when busy; otherwise clear the input, or quit if it's empty |
 
 You can keep typing while the agent works; Enter sends once it's done. Pasted text keeps its line breaks. Prompt history is saved in `history.json` next to the config.
 
-**Approvals.** `write_file`, `edit_file` and `bash` ask first. File changes show a diff with line numbers (new files show all their lines); commands show the command. Choose **Yes** to allow that one call, **Yes, and don't ask again** to allow that tool for the rest of the session, or **No**, which stops the turn so you can tell the agent what to do instead.
+**Permission modes.** Reading, listing and searching never need approval. For everything else, the mode shown in the status bar decides; press `Shift+Tab` to cycle through them:
+
+| Mode | File edits (`write_file`, `edit_file`) | Commands (`bash`) |
+| --- | --- | --- |
+| **ask** (default) | ask | ask |
+| **auto-accept edits** | run without asking (edits are limited to the working directory) | ask |
+| **plan** | refused | refused |
+
+In plan mode the agent is told it can only read and propose a plan. Refused calls return a message to the model, so it carries on with a plan instead of stopping. Switch modes when you want it to proceed.
+
+**Approvals.** File changes show a diff with line numbers (new files show all their lines); commands show the command. Choose **Yes** to allow that one call, or **No**, which stops the turn so you can tell the agent what to do instead. The middle option, "don't ask again", depends on the call:
+
+- **File edits:** switches to auto-accept edits for the rest of the session.
+- **Commands:** allows commands with the same prefix for the rest of the session, shown in the option, e.g. `` `npm test` `` also covers `npm test -- --watch=false`. Plain programs are scoped by name (`ls`, `cat`, `grep`); programs with subcommands include the subcommand (`git status`, `cargo build`, `npm run build`). Programs that can run arbitrary code or change files from their arguments (`python`, `node`, `npx`, `sh`, `sudo`, `rm`, `mv`, `sed`, `find`, `curl`…) are approved for that exact command only.
+- **Not offered** for commands that chain, pipe, substitute or redirect (`&&`, `;`, `|`, `$(…)`, `>`…) or set environment variables, since their prefix says nothing about what they do. These are approved one at a time.
+
+Session approvals are cleared by `/clear`; the mode is kept.
 
 **While it works.** Models that expose their reasoning show it live under "Thinking…", collapsed to "Thought for Ns" once they answer. Commands show their latest output lines as they run. After a file change, the chat shows its diff.
 
@@ -53,14 +70,14 @@ You can keep typing while the agent works; Enter sends once it's done. Pasted te
 
 ## Tools
 
-| Tool | Approval | Description |
+| Tool | Kind | Description |
 | --- | --- | --- |
-| `read_file` | no | Read a file with line numbers (supports offset/limit) |
-| `list_dir` | no | List a directory, optionally recursive |
-| `search` | no | Regex search across files, optional glob filter |
-| `write_file` | yes | Create or overwrite a file |
-| `edit_file` | yes | Replace an exact, unique string in a file |
-| `bash` | yes | Run a shell command (timeout 2 min by default; killed on interrupt). Stdin is closed and pagers and git credential prompts are disabled, so commands can't hang waiting for input |
+| `read_file` | read | Read a file with line numbers (supports offset/limit) |
+| `list_dir` | read | List a directory, optionally recursive |
+| `search` | read | Regex search across files, optional glob filter |
+| `write_file` | edit | Create or overwrite a file |
+| `edit_file` | edit | Replace an exact, unique string in a file |
+| `bash` | execute | Run a shell command (timeout 2 min by default; killed on interrupt). Stdin is closed and pagers and git credential prompts are disabled, so commands can't hang waiting for input |
 
 ### Adding a tool
 
@@ -77,7 +94,9 @@ export const fetchUrl = defineTool({
 	schema: z.object({
 		url: z.string().url().describe('The URL to fetch'),
 	}),
-	requiresApproval: false,              // true → user is asked before each call
+	kind: 'read',                         // 'read' never asks; 'edit' follows the edit rules above;
+	                                      // 'execute' asks unless approved for the session
+	// approvalScope: args => ...,        // optional: what "don't ask again" covers (null = once only)
 	describe: args => args.url,           // one-line summary shown in the chat
 	// preview: args => ({type: 'text', text: '...'}), // optional details for the approval prompt;
 	//                                    // file tools return a diff from diffFile() in ./diff.js
@@ -104,6 +123,7 @@ src/
   config.ts            persisted settings (selected model)
   agent/
     openrouter.ts      streaming chat-completions client, model list
+    permissions.ts     permission modes and approval rules (allow / ask / refuse)
     agent.ts           agent loop, tool execution, approvals, interrupts (no UI code)
   tools/               tool definitions and registry
   ui/
@@ -119,6 +139,7 @@ The `Agent` class reports progress through an `onEvent` callback and asks for ap
 ```sh
 npm run dev        # run from source with tsx
 npm run typecheck
+npm test           # permission rules, and the agent loop against a fake API server
 npm run build
 ```
 

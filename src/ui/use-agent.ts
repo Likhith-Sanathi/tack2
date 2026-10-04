@@ -1,6 +1,7 @@
 import {useCallback, useMemo, useRef, useState} from 'react';
 import {Agent, type AgentEvent, type ApprovalDecision, type ApprovalRequest, type ToolStatus} from '../agent/agent.js';
 import type {Usage} from '../agent/openrouter.js';
+import {nextMode, type PermissionMode} from '../agent/permissions.js';
 import {tools, type ToolPreview} from '../tools/index.js';
 
 export type ChatItem =
@@ -55,7 +56,7 @@ function applyEvent(current: ChatItem[], event: AgentEvent): ChatItem[] {
 				: item,
 		);
 	}
-	if (event.type === 'usage') return current;
+	if (event.type === 'usage' || event.type === 'mode') return current;
 
 	const items = closeThinking(current);
 	const last = items.at(-1);
@@ -106,6 +107,7 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 	const [approval, setApproval] = useState<PendingApproval | null>(null);
 	const approvalRef = useRef<PendingApproval | null>(null);
 	const [usage, setUsage] = useState<UsageTotals>(emptyUsage);
+	const [mode, setModeState] = useState<PermissionMode>('ask');
 	const pending = useRef<AgentEvent[]>([]);
 	const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const priceRef = useRef(options.priceUsage);
@@ -128,6 +130,8 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 							lastPromptTokens: u.prompt_tokens,
 						}));
 					}
+					// Mode changes come from Shift+Tab or from approving all edits; show them right away.
+					if (event.type === 'mode') setModeState(event.mode);
 					if (event.type === 'compacted') {
 						setUsage(prev => ({...prev, lastPromptTokens: event.after}));
 					}
@@ -199,5 +203,7 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 		setItems(prev => [...prev, {id: nextId++, kind, text}]);
 	}, []);
 
-	return {items, running, approval, usage, send, compact, interrupt, reset, setModel, addNotice};
+	const cycleMode = useCallback(() => agent.setMode(nextMode(agent.mode)), [agent]);
+
+	return {items, running, approval, usage, mode, cycleMode, send, compact, interrupt, reset, setModel, addNotice};
 }

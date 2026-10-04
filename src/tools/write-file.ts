@@ -12,7 +12,7 @@ export const writeFile = defineTool({
 		path: z.string().describe('File path, relative to the working directory'),
 		content: z.string().describe('Full file content'),
 	}),
-	requiresApproval: true,
+	kind: 'edit',
 	describe: args => `${args.path} (${args.content.trimEnd().split('\n').length} lines)`,
 	async preview({path, content}, {cwd}) {
 		const before = await fs.readFile(resolveInCwd(cwd, path), 'utf8').catch((error: NodeJS.ErrnoException) => {

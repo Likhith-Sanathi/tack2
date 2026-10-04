@@ -14,7 +14,7 @@ export const listDir = defineTool({
 		path: z.string().optional().describe('Directory, relative to the working directory (default ".")'),
 		recursive: z.boolean().optional().describe('Recurse into subdirectories (default false)'),
 	}),
-	requiresApproval: false,
+	kind: 'read',
 	describe: args => `${args.path ?? '.'}${args.recursive ? ' (recursive)' : ''}`,
 	async run({path = '.', recursive = false}, {cwd, signal}) {
 		const root = resolveInCwd(cwd, path);

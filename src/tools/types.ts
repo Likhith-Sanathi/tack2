@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import type {FileDiff} from './diff.js';
+import type {ToolKind} from '../agent/permissions.js';
 
 export type ToolContext = {
 	/** Directory the agent operates in. */
@@ -18,8 +19,17 @@ export type Tool<S extends z.ZodType = z.ZodType> = {
 	description: string;
 	/** Zod schema for the arguments; converted to JSON Schema for the model and used for validation. */
 	schema: S;
-	/** If true, the user is asked before each call (unless they chose "always" for this session). */
-	requiresApproval: boolean;
+	/**
+	 * What the tool does, which decides when it needs approval: `read` never asks; `edit` asks unless
+	 * the permission mode is auto-edit; `execute` always asks unless approved for the session.
+	 * Plan mode refuses `edit` and `execute` calls.
+	 */
+	kind: ToolKind;
+	/**
+	 * Optional: what "don't ask again" covers for a call, e.g. a command prefix. Return null to only
+	 * offer "once". Without it, "don't ask again" covers the whole tool (or, for edits, all edits).
+	 */
+	approvalScope?: (args: z.infer<S>) => string | null;
 	/** Short human-readable summary of a call, shown in the chat and approval prompt. */
 	describe: (args: z.infer<S>) => string;
 	/**
