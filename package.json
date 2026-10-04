@@ -1,0 +1,36 @@
+{
+  "name": "tack",
+  "version": "0.1.0",
+  "description": "A terminal coding agent powered by OpenRouter",
+  "type": "module",
+  "bin": {
+    "tack": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "ink": "^8.0.0",
+    "picomatch": "^4.0.7",
+    "react": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/picomatch": "^4.0.3",
+    "@types/react": "^19.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
