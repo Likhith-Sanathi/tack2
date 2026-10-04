@@ -3,6 +3,7 @@ import nodePath from 'node:path';
 import {z} from 'zod';
 import {defineTool} from './types.js';
 import {resolveInCwd} from './paths.js';
+import {diffFile} from './diff.js';
 
 export const writeFile = defineTool({
 	name: 'write_file',
@@ -13,7 +14,13 @@ export const writeFile = defineTool({
 	}),
 	requiresApproval: true,
 	describe: args => `${args.path} (${args.content.trimEnd().split('\n').length} lines)`,
-	preview: args => args.content,
+	async preview({path, content}, {cwd}) {
+		const before = await fs.readFile(resolveInCwd(cwd, path), 'utf8').catch((error: NodeJS.ErrnoException) => {
+			if (error.code === 'ENOENT') return null;
+			throw error;
+		});
+		return diffFile(path, before, content);
+	},
 	async run({path, content}, {cwd}) {
 		const target = resolveInCwd(cwd, path);
 		await fs.mkdir(nodePath.dirname(target), {recursive: true});

@@ -4,8 +4,29 @@ import {Spinner, StatusMessage} from '@inkjs/ui';
 import type {ChatItem} from './use-agent.js';
 import {tailToFit} from './fit.js';
 import {renderMarkdown} from './markdown.js';
+import {DiffView, diffSummary} from './diff-view.js';
 
 const MAX_RESULT_LINES = 6;
+const MAX_LIVE_OUTPUT_LINES = 5;
+const MAX_THINKING_LINES = 6;
+const MAX_DIFF_LINES = 40;
+
+/** The last few lines of a running command's output. */
+function LiveOutput({text, maxLines}: {text: string; maxLines: number}) {
+	const lines = text.replace(/\r/g, '').trimEnd().split('\n');
+	const shown = lines.slice(-maxLines);
+	return (
+		<Box marginLeft={2} flexDirection="column">
+			{lines.length > shown.length && <Text dimColor>{`  … ${lines.length - shown.length} earlier lines`}</Text>}
+			{shown.map((line, i) => (
+				<Text key={i} dimColor wrap="truncate-end">
+					{'  '}
+					{line || ' '}
+				</Text>
+			))}
+		</Box>
+	);
+}
 
 function ToolResult({text, color}: {text: string; color?: string}) {
 	const lines = text.split('\n');
@@ -85,9 +106,49 @@ export function ChatItemView({
 							<Text dimColor>{item.summary}</Text>
 						</Text>
 					</Box>
-					{item.result !== undefined && (
-						<ToolResult text={item.result} color={item.status === 'error' ? 'red' : undefined} />
+					{item.status === 'running' && item.output && !awaitingApproval && (
+						<LiveOutput text={item.output} maxLines={Math.min(MAX_LIVE_OUTPUT_LINES, Math.max(1, (maxRows ?? 99) - 3))} />
 					)}
+					{item.status === 'ok' && item.preview?.type === 'diff' ? (
+						<Box marginLeft={2} flexDirection="column">
+							<Text>
+								{'⎿ '}
+								{diffSummary(item.preview)}
+							</Text>
+							<Box marginLeft={2}>
+								<DiffView diff={item.preview} width={width - 4} maxLines={MAX_DIFF_LINES} />
+							</Box>
+						</Box>
+					) : (
+						item.result !== undefined && (
+							<ToolResult text={item.result} color={item.status === 'error' ? 'red' : undefined} />
+						)
+					)}
+				</Box>
+			);
+		}
+		case 'thinking': {
+			if (item.seconds !== undefined) {
+				return (
+					<Box marginTop={1}>
+						<Text dimColor italic>
+							✻ Thought for {item.seconds}s
+						</Text>
+					</Box>
+				);
+			}
+			const budget = Math.min(MAX_THINKING_LINES, Math.max(1, (maxRows ?? 99) - 1));
+			const tail = tailToFit(item.text.trim(), width - 4, budget);
+			return (
+				<Box marginTop={1} flexDirection="column">
+					<Text color="magenta" italic>
+						✻ Thinking…
+					</Text>
+					<Box marginLeft={2}>
+						<Text dimColor italic>
+							{tail.text}
+						</Text>
+					</Box>
 				</Box>
 			);
 		}

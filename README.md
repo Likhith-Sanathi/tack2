@@ -33,10 +33,17 @@ On first launch you pick a model. The list shows OpenRouter models that support 
 | `/clear` | Start a new conversation |
 | `/help` | Show commands and keys |
 | `/exit` | Quit |
+| `Enter` | Send |
+| `Shift+Enter`, `Option/Alt+Enter`, `Ctrl+J`, or `\` then `Enter` | New line (Shift+Enter needs a terminal with the kitty keyboard protocol, e.g. kitty, Ghostty, WezTerm, iTerm2) |
+| `↑` / `↓` | Move between lines; at the first/last line, browse previous prompts |
 | `Esc` | Interrupt the running generation or tool call |
-| `Ctrl+C` | Interrupt when busy, quit when idle |
+| `Ctrl+C` | Interrupt when busy; otherwise clear the input, or quit if it's empty |
 
-**Approvals.** `write_file`, `edit_file` and `bash` ask first and show a preview: the file content, the diff, or the command. Choose **Yes** to allow that one call, **Yes, and don't ask again** to allow that tool for the rest of the session, or **No**, which stops the turn so you can tell the agent what to do instead.
+You can keep typing while the agent works; Enter sends once it's done. Pasted text keeps its line breaks. Prompt history is saved in `history.json` next to the config.
+
+**Approvals.** `write_file`, `edit_file` and `bash` ask first. File changes show a diff with line numbers (new files show all their lines); commands show the command. Choose **Yes** to allow that one call, **Yes, and don't ask again** to allow that tool for the rest of the session, or **No**, which stops the turn so you can tell the agent what to do instead.
+
+**While it works.** Models that expose their reasoning show it live under "Thinking…", collapsed to "Thought for Ns" once they answer. Commands show their latest output lines as they run. After a file change, the chat shows its diff.
 
 **Status bar.** Shows the agent state (ready, thinking, running a tool or waiting for approval), the current model, total input/output tokens, the session cost and how much of the context window the last request used. Cost comes from OpenRouter's usage report. If that's missing, it's estimated from the model's listed prices.
 
@@ -53,7 +60,7 @@ On first launch you pick a model. The list shows OpenRouter models that support 
 | `search` | no | Regex search across files, optional glob filter |
 | `write_file` | yes | Create or overwrite a file |
 | `edit_file` | yes | Replace an exact, unique string in a file |
-| `bash` | yes | Run a shell command (timeout 2 min by default; killed on interrupt) |
+| `bash` | yes | Run a shell command (timeout 2 min by default; killed on interrupt). Stdin is closed and pagers and git credential prompts are disabled, so commands can't hang waiting for input |
 
 ### Adding a tool
 
@@ -72,8 +79,9 @@ export const fetchUrl = defineTool({
 	}),
 	requiresApproval: false,              // true → user is asked before each call
 	describe: args => args.url,           // one-line summary shown in the chat
-	// preview: args => '...',            // optional details for the approval prompt
-	async run({url}, {cwd, signal}) {
+	// preview: args => ({type: 'text', text: '...'}), // optional details for the approval prompt;
+	//                                    // file tools return a diff from diffFile() in ./diff.js
+	async run({url}, {signal, onOutput}) { // onOutput(chunk) streams progress to the UI
 		const res = await fetch(url, {signal}); // honor `signal` so Esc can interrupt
 		return (await res.text()).slice(0, 20_000);
 	},

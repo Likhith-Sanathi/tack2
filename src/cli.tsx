@@ -10,4 +10,8 @@ if (!apiKey) {
 	process.exit(1);
 }
 
-render(<App apiKey={apiKey} cwd={process.cwd()} initialModel={loadConfig().model} />, {exitOnCtrlC: false});
+render(<App apiKey={apiKey} cwd={process.cwd()} initialModel={loadConfig().model} />, {
+	exitOnCtrlC: false,
+	// Lets terminals that support it report Shift+Enter, used for new lines in the prompt.
+	kittyKeyboard: {mode: 'auto'},
+});

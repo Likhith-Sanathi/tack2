@@ -1,13 +1,15 @@
 import {z} from 'zod';
-import type {AnyTool} from '../tools/index.js';
+import type {AnyTool, ToolPreview} from '../tools/index.js';
 import {ApiError, streamChat, type ChatMessage, type StreamResult, type ToolCall, type ToolSpec, type Usage} from './openrouter.js';
 
 export type ToolStatus = 'ok' | 'error' | 'denied' | 'interrupted';
 
 export type AgentEvent =
 	| {type: 'text'; delta: string}
+	| {type: 'reasoning'; delta: string}
 	| {type: 'assistant_done'}
-	| {type: 'tool_start'; id: string; name: string; summary: string}
+	| {type: 'tool_start'; id: string; name: string; summary: string; preview?: ToolPreview}
+	| {type: 'tool_output'; id: string; chunk: string}
 	| {type: 'tool_end'; id: string; status: ToolStatus; result: string}
 	| {type: 'usage'; usage: Usage}
 	/** Older messages were replaced by a summary; token counts are estimates. */
@@ -15,7 +17,7 @@ export type AgentEvent =
 	| {type: 'notice'; message: string}
 	| {type: 'error'; message: string};
 
-export type ApprovalRequest = {toolName: string; summary: string; preview?: string};
+export type ApprovalRequest = {toolName: string; summary: string; preview?: ToolPreview};
 export type ApprovalDecision = 'once' | 'always' | 'deny';
 
 export type AgentOptions = {
@@ -245,6 +247,7 @@ export class Agent {
 						partial += delta;
 						this.emit({type: 'text', delta});
 					},
+					onReasoning: delta => this.emit({type: 'reasoning', delta}),
 				});
 				if (result.usage) {
 					this.lastPrompt = {tokens: result.usage.prompt_tokens, messageCount: this.messages.length};
@@ -355,11 +358,24 @@ export class Agent {
 		}
 		const args = parsed.data;
 		const summary = tool.describe(args);
-		this.emit({type: 'tool_start', id: call.id, name, summary});
+		const ctx = {
+			cwd: this.options.cwd,
+			signal,
+			onOutput: (chunk: string) => this.emit({type: 'tool_output', id: call.id, chunk}),
+		};
+		let preview: ToolPreview | undefined;
+		try {
+			preview = await tool.preview?.(args, ctx);
+		} catch (error) {
+			// The call would fail (e.g. old_string not found), so report it without asking the user.
+			this.emit({type: 'tool_start', id: call.id, name, summary});
+			return finish('error', `Error: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		this.emit({type: 'tool_start', id: call.id, name, summary, preview});
 
 		if (tool.requiresApproval && !this.alwaysAllowed.has(name)) {
 			const decision = await Promise.race([
-				this.options.requestApproval({toolName: name, summary, preview: tool.preview?.(args)}),
+				this.options.requestApproval({toolName: name, summary, preview}),
 				abortPromise(signal),
 			]);
 			if (decision === 'interrupted') return finish('interrupted', 'Interrupted by the user.');
@@ -368,7 +384,7 @@ export class Agent {
 		}
 
 		try {
-			const output = await tool.run(args, {cwd: this.options.cwd, signal});
+			const output = await tool.run(args, ctx);
 			if (signal.aborted) return finish('interrupted', `Interrupted by the user. Partial output:\n${output}`);
 			return finish('ok', output);
 		} catch (error) {

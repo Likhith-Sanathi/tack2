@@ -1,17 +1,18 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Box, Static, Text, useApp, useInput, useWindowSize} from 'ink';
-import {TextInput} from '@inkjs/ui';
 import {listModels, type ModelInfo, type Usage} from '../agent/openrouter.js';
-import {loadConfig, saveConfig} from '../config.js';
+import {loadConfig, loadHistory, saveConfig, saveHistory} from '../config.js';
 import {ChatItemView} from './chat-item.js';
 import {ApprovalPrompt} from './approval-prompt.js';
 import {ModelPicker} from './model-picker.js';
 import {StatusBar, type Activity} from './status-bar.js';
+import {PromptInput, type PromptInputHandle} from './prompt-input.js';
 import {useAgent, type ChatItem} from './use-agent.js';
 
 const HELP = [
 	'Commands: /model (switch model), /compact (summarize to free context), /clear (new conversation), /help, /exit',
-	'Keys: Esc interrupts the agent · Ctrl+C interrupts, or quits when idle',
+	'Keys: Enter sends · Shift+Enter, Option+Enter, Ctrl+J or \\ then Enter adds a new line · ↑/↓ history',
+	'      Esc interrupts the agent · Ctrl+C interrupts, clears the input, or quits when idle',
 ].join('\n');
 
 type StaticEntry = {id: number; kind: 'header'} | ChatItem;
@@ -23,7 +24,10 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const [picking, setPicking] = useState(!initialModel);
 	const [models, setModels] = useState<ModelInfo[] | null>(null);
 	const [modelsError, setModelsError] = useState<string | null>(null);
-	const [inputKey, setInputKey] = useState(0);
+	const [history, setHistory] = useState(loadHistory);
+	const [draftLines, setDraftLines] = useState(1);
+	const draft = useRef('');
+	const input = useRef<PromptInputHandle>(null);
 	const [staticKey, setStaticKey] = useState(0);
 
 	useEffect(() => {
@@ -55,12 +59,13 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 		[agent],
 	);
 
-	useInput((input, key) => {
+	useInput((char, key) => {
 		if (key.escape) {
 			if (agent.running) agent.interrupt();
 			else if (picking && model) setPicking(false);
-		} else if (key.ctrl && input === 'c') {
+		} else if (key.ctrl && char === 'c') {
 			if (agent.running) agent.interrupt();
+			else if (draft.current) input.current?.clear();
 			else exit();
 		}
 	});
@@ -68,7 +73,13 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const submit = (value: string) => {
 		const text = value.trim();
 		if (!text) return;
-		setInputKey(k => k + 1); // remount the input to clear it
+		draft.current = '';
+		setDraftLines(1);
+		setHistory(prev => {
+			const next = prev.at(-1) === text ? prev : [...prev, text];
+			saveHistory(next);
+			return next;
+		});
 		if (!text.startsWith('/')) {
 			void agent.send(text);
 			return;
@@ -97,9 +108,17 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 		}
 	};
 
+	const inputActive = !agent.approval && !picking;
+	const maxInputLines = Math.max(1, Math.min(12, Math.floor(rows / 3)));
+	// Rows the input text takes, including its "more lines" indicators.
+	const inputRows = Math.min(draftLines, maxInputLines) + (draftLines > maxInputLines ? 2 : 0);
+
 	// Finished items are printed once via <Static>; only the in-progress tail re-renders.
 	const firstLive = agent.items.findIndex(
-		item => (item.kind === 'assistant' && !item.done) || (item.kind === 'tool' && item.status === 'running'),
+		item =>
+			(item.kind === 'assistant' && !item.done) ||
+			(item.kind === 'thinking' && item.seconds === undefined) ||
+			(item.kind === 'tool' && item.status === 'running'),
 	);
 	const splitAt = firstLive === -1 ? agent.items.length : firstLive;
 	const staticEntries: StaticEntry[] = [{id: -1, kind: 'header'}, ...agent.items.slice(0, splitAt)];
@@ -123,7 +142,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 								tack
 							</Text>
 							<Text dimColor>{cwd}</Text>
-							<Text dimColor>/help for commands · Esc to interrupt · Ctrl+C to quit</Text>
+							<Text dimColor>/help for commands · Shift/Option+Enter for a new line · Esc to interrupt</Text>
 						</Box>
 					) : (
 						// Static output is laid out without a parent width, so give it one explicitly for wrapping.
@@ -139,25 +158,37 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 					item={item}
 					width={columns}
 					// Leave room for the input box, status bar and margins so the live frame never fills the terminal.
-					maxRows={Math.max(1, rows - 9)}
+					maxRows={Math.max(1, rows - 8 - inputRows)}
 					awaitingApproval={agent.approval !== null}
 				/>
 			))}
 			{agent.approval ? (
-				<ApprovalPrompt approval={agent.approval} rows={rows} />
-			) : picking ? (
-				<ModelPicker rows={rows} models={models} error={modelsError} current={model} onSelect={chooseModel} />
+				<ApprovalPrompt approval={agent.approval} rows={rows} columns={columns} />
 			) : (
-				<Box borderStyle="round" borderColor={agent.running ? 'gray' : 'cyan'} paddingX={1} marginTop={1}>
-					<Text color="cyan">{'› '}</Text>
-					<TextInput
-						key={inputKey}
-						isDisabled={agent.running}
-						placeholder={agent.running ? 'Agent is working… (Esc to interrupt)' : 'Ask tack to do something'}
-						onSubmit={submit}
-					/>
-				</Box>
+				picking && <ModelPicker rows={rows} models={models} error={modelsError} current={model} onSelect={chooseModel} />
 			)}
+			{/* Stays mounted while hidden so a draft survives approval prompts and the model picker. */}
+			<Box
+				display={inputActive ? 'flex' : 'none'}
+				borderStyle="round"
+				borderColor={agent.running ? 'gray' : 'cyan'}
+				paddingX={1}
+				marginTop={1}
+			>
+				<PromptInput
+					ref={input}
+					isActive={inputActive}
+					canSubmit={!agent.running}
+					maxLines={maxInputLines}
+					history={history}
+					placeholder={agent.running ? 'Agent is working… type ahead, Esc to interrupt' : 'Ask tack to do something'}
+					onSubmit={submit}
+					onChange={value => {
+						draft.current = value;
+						setDraftLines(value.split('\n').length);
+					}}
+				/>
+			</Box>
 			<StatusBar
 				model={model}
 				activity={activity}

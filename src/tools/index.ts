@@ -9,5 +9,6 @@ import {bash} from './bash.js';
 /** Every tool the agent can use. To add a tool, define it with `defineTool` and append it here. */
 export const tools: AnyTool[] = [readFile, writeFile, editFile, listDir, search, bash];
 
-export type {AnyTool, Tool, ToolContext} from './types.js';
+export type {AnyTool, Tool, ToolContext, ToolPreview} from './types.js';
+export type {DiffLine, FileDiff} from './diff.js';
 export {defineTool} from './types.js';

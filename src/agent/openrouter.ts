@@ -112,6 +112,8 @@ type StreamChunk = {
 	choices?: Array<{
 		delta?: {
 			content?: string | null;
+			reasoning?: string | null;
+			reasoning_details?: Array<{type?: string; text?: string; summary?: string}>;
 			tool_calls?: Array<{
 				index: number;
 				id?: string;
@@ -130,6 +132,8 @@ export async function streamChat(options: {
 	tools: ToolSpec[];
 	signal: AbortSignal;
 	onText: (delta: string) => void;
+	/** Receives the model's thinking, for models that expose it. */
+	onReasoning?: (delta: string) => void;
 }): Promise<StreamResult> {
 	const res = await request(`${BASE_URL}/chat/completions`, {
 		method: 'POST',
@@ -156,6 +160,13 @@ export async function streamChat(options: {
 		if (!choice) continue;
 		if (choice.finish_reason) result.finishReason = choice.finish_reason;
 		const delta = choice.delta;
+		// Some providers only fill reasoning_details; avoid showing the same text twice.
+		const reasoning =
+			delta?.reasoning ||
+			(delta?.reasoning_details ?? [])
+				.map(d => (d.type === 'reasoning.text' ? d.text : d.type === 'reasoning.summary' ? d.summary : '') ?? '')
+				.join('');
+		if (reasoning) options.onReasoning?.(reasoning);
 		if (delta?.content) {
 			result.content += delta.content;
 			options.onText(delta.content);

@@ -19,3 +19,25 @@ export function saveConfig(config: Config): void {
 	fs.mkdirSync(dir, {recursive: true});
 	fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
 }
+
+const historyPath = path.join(dir, 'history.json');
+const MAX_HISTORY = 200;
+
+/** Previously submitted prompts, oldest first. */
+export function loadHistory(): string[] {
+	try {
+		const data: unknown = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+		return Array.isArray(data) ? data.filter((entry): entry is string => typeof entry === 'string') : [];
+	} catch {
+		return [];
+	}
+}
+
+export function saveHistory(history: string[]): void {
+	try {
+		fs.mkdirSync(dir, {recursive: true});
+		fs.writeFileSync(historyPath, JSON.stringify(history.slice(-MAX_HISTORY)) + '\n');
+	} catch {
+		// History is a convenience; never fail a prompt over it.
+	}
+}

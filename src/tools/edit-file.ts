@@ -2,6 +2,23 @@ import fs from 'node:fs/promises';
 import {z} from 'zod';
 import {defineTool} from './types.js';
 import {resolveInCwd} from './paths.js';
+import {diffFile} from './diff.js';
+
+type EditArgs = {path: string; old_string: string; new_string: string; replace_all?: boolean};
+
+/** Applies the edit in memory; throws if old_string is missing or ambiguous. */
+async function applyEdit({path, old_string, new_string, replace_all}: EditArgs, cwd: string) {
+	const target = resolveInCwd(cwd, path);
+	const before = await fs.readFile(target, 'utf8');
+	const count = before.split(old_string).length - 1;
+	if (count === 0) throw new Error('old_string not found in file');
+	if (count > 1 && !replace_all) {
+		throw new Error(`old_string occurs ${count} times; add more context or set replace_all`);
+	}
+	// Use a replacer function so `$` sequences in new_string are inserted literally.
+	const after = replace_all ? before.split(old_string).join(new_string) : before.replace(old_string, () => new_string);
+	return {target, before, after, count: replace_all ? count : 1};
+}
 
 export const editFile = defineTool({
 	name: 'edit_file',
@@ -15,24 +32,13 @@ export const editFile = defineTool({
 	}),
 	requiresApproval: true,
 	describe: args => args.path,
-	preview: args =>
-		[
-			...args.old_string.split('\n').map(l => `- ${l}`),
-			...args.new_string.split('\n').map(l => `+ ${l}`),
-		].join('\n'),
-	async run({path, old_string, new_string, replace_all}, {cwd}) {
-		const target = resolveInCwd(cwd, path);
-		const text = await fs.readFile(target, 'utf8');
-		const count = text.split(old_string).length - 1;
-		if (count === 0) throw new Error('old_string not found in file');
-		if (count > 1 && !replace_all) {
-			throw new Error(`old_string occurs ${count} times; add more context or set replace_all`);
-		}
-		// Use a replacer function so `$` sequences in new_string are inserted literally.
-		const updated = replace_all
-			? text.split(old_string).join(new_string)
-			: text.replace(old_string, () => new_string);
-		await fs.writeFile(target, updated, 'utf8');
-		return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path}`;
+	async preview(args, {cwd}) {
+		const {before, after} = await applyEdit(args, cwd);
+		return diffFile(args.path, before, after);
+	},
+	async run(args, {cwd}) {
+		const {target, after, count} = await applyEdit(args, cwd);
+		await fs.writeFile(target, after, 'utf8');
+		return `Replaced ${count} occurrence(s) in ${args.path}`;
 	},
 });
