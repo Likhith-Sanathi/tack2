@@ -8,6 +8,7 @@ import {ModelPicker} from './model-picker.js';
 import {StatusBar, type Activity} from './status-bar.js';
 import {PromptInput, type PromptInputHandle} from './prompt-input.js';
 import {useAgent, type ChatItem} from './use-agent.js';
+import {matchCommands} from './commands.js';
 
 const HELP = [
 	'Commands: /model (switch model), /compact (summarize to free context), /clear (new conversation), /help, /exit',
@@ -27,6 +28,8 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const [modelsError, setModelsError] = useState<string | null>(null);
 	const [history, setHistory] = useState(loadHistory);
 	const [draftLines, setDraftLines] = useState(1);
+	// Rows the slash-command menu takes under the input (commands, margin and hint line).
+	const [menuRows, setMenuRows] = useState(0);
 	const draft = useRef('');
 	const input = useRef<PromptInputHandle>(null);
 	const [staticKey, setStaticKey] = useState(0);
@@ -78,6 +81,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 		if (!text) return;
 		draft.current = '';
 		setDraftLines(1);
+		setMenuRows(0);
 		setHistory(prev => {
 			const next = prev.at(-1) === text ? prev : [...prev, text];
 			saveHistory(next);
@@ -114,7 +118,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const inputActive = !agent.approval && !picking;
 	const maxInputLines = Math.max(1, Math.min(12, Math.floor(rows / 3)));
 	// Rows the input text takes, including its "more lines" indicators.
-	const inputRows = Math.min(draftLines, maxInputLines) + (draftLines > maxInputLines ? 2 : 0);
+	const inputRows = Math.min(draftLines, maxInputLines) + (draftLines > maxInputLines ? 2 : 0) + menuRows;
 
 	// Finished items are printed once via <Static>; only the in-progress tail re-renders.
 	const firstLive = agent.items.findIndex(
@@ -189,6 +193,8 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 					onChange={value => {
 						draft.current = value;
 						setDraftLines(value.split('\n').length);
+						const matches = matchCommands(value).length;
+						setMenuRows(matches > 0 ? matches + 2 : 0);
 					}}
 				/>
 			</Box>

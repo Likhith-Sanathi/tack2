@@ -1,11 +1,16 @@
 import React, {useImperativeHandle, useReducer, useRef, type Ref} from 'react';
 import {Box, Text, useInput, usePaste} from 'ink';
+import {matchCommands} from './commands.js';
 
 // Multi-line prompt editor with history. @inkjs/ui's TextInput is single-line, so this is custom.
 //
 // Enter submits. Shift+Enter (terminals with the kitty keyboard protocol), Option/Alt+Enter,
 // Ctrl+J, or a trailing "\" before Enter insert a newline. ↑/↓ move between lines, and at the
 // first/last line step through history. Pasted text is inserted as-is, newlines included.
+//
+// Typing "/" opens a menu of slash commands, filtered as you type, with the rest of the highlighted
+// command shown as dim ghost text. ↑/↓ pick a command, Tab (or → at the end) fills it in, Enter
+// runs it, and Esc closes the menu.
 
 export type PromptInputHandle = {clear: () => void};
 
@@ -24,6 +29,8 @@ type Props = {
 };
 
 type Position = {row: number; col: number};
+
+const COMMAND_COLUMN = 12;
 
 function position(value: string, cursor: number): Position {
 	const before = value.slice(0, cursor).split('\n');
@@ -56,12 +63,17 @@ export function PromptInput({ref, placeholder, canSubmit, isActive, maxLines, hi
 	// Index into history while browsing it (0 = newest), and the draft it replaced.
 	const browsing = useRef<{index: number; draft: string} | null>(null);
 	const [, rerender] = useReducer((n: number) => n + 1, 0);
+	// Highlighted command in the slash menu, and the input value the user closed the menu for.
+	const menu = useRef({selected: 0, dismissedFor: null as string | null});
 
 	const set = (value: string, cursor: number, keepBrowsing = false) => {
 		const changed = value !== state.current.value;
 		state.current = {value, cursor: Math.max(0, Math.min(cursor, value.length))};
 		if (!keepBrowsing) browsing.current = null;
-		if (changed) onChange?.(value);
+		if (changed) {
+			menu.current.selected = 0;
+			onChange?.(value);
+		}
 		rerender();
 	};
 
@@ -78,11 +90,38 @@ export function PromptInput({ref, placeholder, canSubmit, isActive, maxLines, hi
 		set(entry, cursorAtStart ? 0 : entry.length, index >= 0);
 	};
 
+	/** Commands to show in the menu; empty when it is closed. Never shown while browsing history. */
+	const menuMatches = (value: string) =>
+		browsing.current || menu.current.dismissedFor === value ? [] : matchCommands(value);
+
 	useInput(
 		(input, key) => {
 			const {value, cursor} = state.current;
 			const lines = value.split('\n');
 			const pos = position(value, cursor);
+
+			const matches = menuMatches(value);
+			if (matches.length > 0) {
+				const index = Math.min(menu.current.selected, matches.length - 1);
+				const command = matches[index]!.name;
+				if (key.upArrow || key.downArrow) {
+					const step = key.upArrow ? -1 : 1;
+					menu.current.selected = (index + step + matches.length) % matches.length;
+					return rerender();
+				}
+				if (key.tab && !key.shift) return set(command, command.length);
+				if (key.rightArrow && cursor === value.length && command !== value) return set(command, command.length);
+				if (key.escape) {
+					menu.current.dismissedFor = value;
+					return rerender();
+				}
+				if (key.return && !key.shift && !key.meta) {
+					if (!canSubmit) return;
+					set('', 0);
+					onSubmit(command);
+					return;
+				}
+			}
 
 			if (key.return) {
 				if (key.shift || key.meta) return insert('\n');
@@ -143,6 +182,9 @@ export function PromptInput({ref, placeholder, canSubmit, isActive, maxLines, hi
 	const first = Math.max(0, Math.min(pos.row - visible + 1, lines.length - visible));
 	const shown = lines.slice(first, first + visible);
 	const hiddenBelow = lines.length - first - shown.length;
+	const matches = menuMatches(value);
+	const selected = Math.min(menu.current.selected, Math.max(0, matches.length - 1));
+	const highlighted = matches[selected]?.name;
 
 	return (
 		<Box flexDirection="column" display={isActive ? 'flex' : 'none'}>
@@ -162,20 +204,40 @@ export function PromptInput({ref, placeholder, canSubmit, isActive, maxLines, hi
 					);
 				}
 				const hasCursor = row === pos.row && isActive;
+				// Dim rest of the highlighted command after the cursor; Tab fills it in.
+				const ghost = highlighted?.startsWith(value) && cursor === value.length ? highlighted.slice(value.length) : '';
 				return (
 					<Box key={row}>
 						{prefix}
 						<Box flexShrink={1}>
 							<Text>
 								{hasCursor ? line.slice(0, pos.col) : line}
-								{hasCursor && <Text inverse>{line[pos.col] ?? ' '}</Text>}
+								{hasCursor && <Text inverse>{line[pos.col] ?? ghost[0] ?? ' '}</Text>}
 								{hasCursor && line.slice(pos.col + 1)}
+								{hasCursor && ghost && <Text dimColor>{ghost.slice(1)}</Text>}
 							</Text>
 						</Box>
 					</Box>
 				);
 			})}
 			{hiddenBelow > 0 && <Text dimColor>{`  ↓ ${hiddenBelow} more line${hiddenBelow === 1 ? '' : 's'}`}</Text>}
+			{isActive && matches.length > 0 && (
+				<Box flexDirection="column" marginTop={1}>
+					{matches.map((command, i) => {
+						const isSelected = i === selected;
+						return (
+							<Box key={command.name}>
+								<Text color={isSelected ? 'cyan' : undefined} bold={isSelected}>
+									{isSelected ? '❯ ' : '  '}
+									{command.name.padEnd(COMMAND_COLUMN)}
+								</Text>
+								<Text dimColor={!isSelected}>{command.description}</Text>
+							</Box>
+						);
+					})}
+					<Text dimColor>{'  ↑/↓ select · Tab complete · Enter run · Esc close'}</Text>
+				</Box>
+			)}
 		</Box>
 	);
 }

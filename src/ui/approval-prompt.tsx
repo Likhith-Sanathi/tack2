@@ -11,14 +11,17 @@ const MAX_PREVIEW_LINES = 30;
 // the three options and the status bar.
 const CHROME_ROWS = 14;
 
-function alwaysLabel(option: AlwaysOption): string {
+function alwaysLabel(option: AlwaysOption, summary: string): string {
 	switch (option.type) {
 		case 'mode':
 			return 'Yes, and auto-accept edits for the rest of this session';
 		case 'tool':
 			return `Yes, and don't ask again for ${option.tool} this session`;
 		case 'scope':
-			return `Yes, and don't ask again for \`${option.scope}\` commands this session`;
+			// Interpreters and similar are approved for the exact command only; say so plainly.
+			return option.scope === summary.trim().replace(/\s+/g, ' ')
+				? "Yes, and don't ask again for this exact command this session"
+				: `Yes, and don't ask again for \`${option.scope}\` commands this session`;
 	}
 }
 
@@ -28,7 +31,7 @@ export function ApprovalPrompt({approval, rows, columns}: {approval: PendingAppr
 	const innerWidth = columns - 4; // border and padding
 	const options = [
 		{label: 'Yes', value: 'once'},
-		...(approval.always ? [{label: alwaysLabel(approval.always), value: 'always'}] : []),
+		...(approval.always ? [{label: alwaysLabel(approval.always, approval.summary), value: 'always'}] : []),
 		{label: 'No, and tell the agent what to do instead', value: 'deny'},
 	];
 	const textLines = preview?.type === 'text' ? preview.text.split('\n') : [];

@@ -28,6 +28,7 @@ On first launch you pick a model. The list shows OpenRouter models that support 
 
 | Input | Action |
 | --- | --- |
+| `/` | Open the command menu: type to filter, `↑`/`↓` to pick, `Tab` (or `→`) to fill in, `Enter` to run, `Esc` to close |
 | `/model` | Switch model (persists) |
 | `/compact` | Summarize the conversation so far to free up context |
 | `/clear` | Start a new conversation |
