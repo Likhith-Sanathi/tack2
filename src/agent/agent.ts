@@ -49,7 +49,8 @@ const CHARS_PER_TOKEN = 4;
 const FALLBACK_CONTEXT = 32_000;
 
 const PLAN_MODE_NOTE =
-	'PLAN MODE IS ON: you may only read and search. Do not try to edit files or run commands; ' +
+	'PLAN MODE IS ON: you may only read and search. Do not edit files or run commands other than ' +
+	'read-only ones (ls, cat, grep, git status/diff/log); ' +
 	'investigate, then present a concrete plan and wait for the user to approve it.';
 
 function systemPrompt(cwd: string): string {

@@ -36,19 +36,22 @@ On first launch you pick a model. The list shows OpenRouter models that support 
 | `Enter` | Send |
 | `Shift+Enter`, `Option/Alt+Enter`, `Ctrl+J`, or `\` then `Enter` | New line (Shift+Enter needs a terminal with the kitty keyboard protocol, e.g. kitty, Ghostty, WezTerm, iTerm2) |
 | `↑` / `↓` | Move between lines; at the first/last line, browse previous prompts |
-| `Shift+Tab` | Cycle permission modes: ask → auto-accept edits → plan |
+| `Shift+Tab` | Cycle permission modes: ask → auto-accept edits → plan → auto |
 | `Esc` | Interrupt the running generation or tool call |
 | `Ctrl+C` | Interrupt when busy; otherwise clear the input, or quit if it's empty |
 
 You can keep typing while the agent works; Enter sends once it's done. Pasted text keeps its line breaks. Prompt history is saved in `history.json` next to the config.
 
-**Permission modes.** Reading, listing and searching never need approval. For everything else, the mode shown in the status bar decides; press `Shift+Tab` to cycle through them:
+**Permission modes.** Reading, listing and searching never need approval, and neither do read-only commands such as `ls`, `cat`, `grep`, `git status`, `git diff` or `git log`, as long as they stay inside the working directory: no absolute paths, `~` or `..`, and no redirects, pipes, quotes or variables. For everything else, the mode shown in the status bar decides; press `Shift+Tab` to cycle through them:
 
 | Mode | File edits (`write_file`, `edit_file`) | Commands (`bash`) |
 | --- | --- | --- |
 | **ask** (default) | ask | ask |
 | **auto-accept edits** | run without asking (edits are limited to the working directory) | ask |
-| **plan** | refused | refused |
+| **plan** | refused | refused (read-only commands still run) |
+| **auto** | run without asking | run without asking |
+
+**auto** never asks. Every command runs as soon as the model requests it, including ones that delete files or reach the network, so use it only in a project you can restore (for example, one committed to git). File tools still refuse paths outside the working directory, but shell commands can reach anything your user account can. It comes last in the cycle, so getting to plan mode never passes through it, and one more `Shift+Tab` returns to ask. The status bar shows it in red.
 
 In plan mode the agent is told it can only read and propose a plan. Refused calls return a message to the model, so it carries on with a plan instead of stopping. Switch modes when you want it to proceed.
 
@@ -97,6 +100,7 @@ export const fetchUrl = defineTool({
 	kind: 'read',                         // 'read' never asks; 'edit' follows the edit rules above;
 	                                      // 'execute' asks unless approved for the session
 	// approvalScope: args => ...,        // optional: what "don't ask again" covers (null = once only)
+	// isReadOnly: args => ...,           // optional: true for calls that only read (run without asking)
 	describe: args => args.url,           // one-line summary shown in the chat
 	// preview: args => ({type: 'text', text: '...'}), // optional details for the approval prompt;
 	//                                    // file tools return a diff from diffFile() in ./diff.js

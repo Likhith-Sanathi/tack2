@@ -18,6 +18,8 @@ function ModeIndicator({mode}: {mode: PermissionMode}) {
 			return <Text color="magenta">⏵⏵ auto-accept edits <Text dimColor>(shift+tab)</Text></Text>;
 		case 'plan':
 			return <Text color="cyan">⏸ plan mode <Text dimColor>(shift+tab)</Text></Text>;
+		case 'auto':
+			return <Text color="red" bold>⏵⏵⏵ auto: no approvals <Text dimColor bold={false}>(shift+tab)</Text></Text>;
 	}
 }
 

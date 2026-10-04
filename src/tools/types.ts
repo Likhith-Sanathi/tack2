@@ -30,6 +30,8 @@ export type Tool<S extends z.ZodType = z.ZodType> = {
 	 * offer "once". Without it, "don't ask again" covers the whole tool (or, for edits, all edits).
 	 */
 	approvalScope?: (args: z.infer<S>) => string | null;
+	/** Optional: true if this call only reads (e.g. `ls`), so it runs without approval in every mode. */
+	isReadOnly?: (args: z.infer<S>) => boolean;
 	/** Short human-readable summary of a call, shown in the chat and approval prompt. */
 	describe: (args: z.infer<S>) => string;
 	/**

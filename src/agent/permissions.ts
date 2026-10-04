@@ -4,15 +4,19 @@
 /** What a tool does, which decides how permission modes treat it. */
 export type ToolKind = 'read' | 'edit' | 'execute';
 
-export type PermissionMode = 'ask' | 'auto-edit' | 'plan';
+export type PermissionMode = 'ask' | 'auto-edit' | 'plan' | 'auto';
 
-/** Order used when cycling with Shift+Tab. */
-export const PERMISSION_MODES: PermissionMode[] = ['ask', 'auto-edit', 'plan'];
+/**
+ * Order used when cycling with Shift+Tab. `auto` comes last so reaching plan mode never passes
+ * through it, and one more press from `auto` returns to the safest mode.
+ */
+export const PERMISSION_MODES: PermissionMode[] = ['ask', 'auto-edit', 'plan', 'auto'];
 
 export const MODE_LABELS: Record<PermissionMode, string> = {
 	ask: 'ask before edits and commands',
 	'auto-edit': 'auto-accept edits',
 	plan: 'plan mode (read-only)',
+	auto: 'auto (no approvals)',
 };
 
 export function nextMode(mode: PermissionMode): PermissionMode {
@@ -28,6 +32,8 @@ export type PermissionSubject = {
 	 * call can only be approved once. Without it, "don't ask again" covers the whole tool.
 	 */
 	approvalScope?: (args: never) => string | null;
+	/** True if this particular call only reads (e.g. `ls`), so it is treated like a `read` tool. */
+	isReadOnly?: (args: never) => boolean;
 };
 
 export type PermissionCheck =
@@ -42,8 +48,8 @@ export type AlwaysOption =
 	| {type: 'scope'; tool: string; scope: string; label: string};
 
 export const PLAN_MODE_DENIAL =
-	'Plan mode is on, so this action is not allowed. Only read and search the project, then describe ' +
-	'the changes you propose. The user can leave plan mode with Shift+Tab when they want you to proceed.';
+	'Plan mode is on, so this action is not allowed. Only read and search the project (read-only ' +
+	'commands such as ls, cat or git status/diff/log are fine), then describe the changes you propose. The user can leave plan mode with Shift+Tab when they want you to proceed.';
 
 export class Permissions {
 	mode: PermissionMode = 'ask';
@@ -52,7 +58,8 @@ export class Permissions {
 	private readonly allowedScopes = new Map<string, Set<string>>();
 
 	check(tool: PermissionSubject, args: unknown): PermissionCheck {
-		if (tool.kind === 'read') return {behavior: 'allow'};
+		if (tool.kind === 'read' || tool.isReadOnly?.(args as never)) return {behavior: 'allow'};
+		if (this.mode === 'auto') return {behavior: 'allow'};
 		if (this.mode === 'plan') return {behavior: 'deny', reason: PLAN_MODE_DENIAL};
 		if (tool.kind === 'edit' && this.mode === 'auto-edit') return {behavior: 'allow'};
 		if (this.allowedTools.has(tool.name)) return {behavior: 'allow'};
@@ -143,4 +150,28 @@ export function commandScope(command: string): string | null {
 		return third !== undefined && SUBCOMMAND.test(third) ? `${program} ${second} ${third}` : normalized;
 	}
 	return `${program} ${second}`;
+}
+
+/** Programs that only read and print, whatever their arguments (given no redirects or substitutions). */
+const READ_ONLY_PROGRAMS = new Set([
+	'ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'grep', 'egrep', 'fgrep', 'which', 'stat', 'du', 'df',
+	'echo', 'whoami', 'uname', 'basename', 'dirname', 'realpath', 'diff', 'cmp',
+]);
+const READ_ONLY_GIT = new Set(['status', 'diff', 'log', 'show', 'blame', 'ls-files', 'rev-parse']);
+
+/**
+ * True for commands that can only read inside the working directory, such as `ls src` or
+ * `git diff`. Those run without approval. Anything that names a path outside the project
+ * (absolute, `~`, `..`), uses quotes or variables, or could write output is not read-only.
+ */
+export function isReadOnlyCommand(command: string): boolean {
+	const normalized = command.trim().replace(/\s+/g, ' ');
+	if (!normalized || UNSAFE_SHELL.test(normalized) || /['"\\$]/.test(normalized)) return false;
+	const [program, ...args] = normalized.split(' ') as [string, ...string[]];
+	for (const arg of args) {
+		const value = arg.replace(/^-+[^=]*=/, ''); // check the value of --flag=value too
+		if (/^[/~]/.test(value) || value.split('/').includes('..') || /^--output/.test(arg)) return false;
+	}
+	if (READ_ONLY_PROGRAMS.has(program)) return true;
+	return program === 'git' && args[0] !== undefined && READ_ONLY_GIT.has(args[0]);
 }

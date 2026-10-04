@@ -12,7 +12,7 @@ import {useAgent, type ChatItem} from './use-agent.js';
 const HELP = [
 	'Commands: /model (switch model), /compact (summarize to free context), /clear (new conversation), /help, /exit',
 	'Keys: Enter sends · Shift+Enter, Option+Enter, Ctrl+J or \\ then Enter adds a new line · ↑/↓ history',
-	'      Shift+Tab cycles permission modes: ask → auto-accept edits → plan (read-only)',
+	'      Shift+Tab cycles permission modes: ask → auto-accept edits → plan (read-only) → auto (no approvals)',
 	'      Esc interrupts the agent · Ctrl+C interrupts, clears the input, or quits when idle',
 ].join('\n');
 

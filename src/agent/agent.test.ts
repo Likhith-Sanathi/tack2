@@ -85,11 +85,11 @@ test('"always" on an edit switches to auto-edit and stops asking', async () => {
 test('auto-edit writes without asking but still asks for commands', async () => {
 	const {agent, cwd, approvals} = setup('once');
 	agent.setMode('auto-edit');
-	replies = [write('a.txt'), {call: {name: 'bash', args: {command: 'echo hi'}}}, {text: 'ok'}];
+	replies = [write('a.txt'), {call: {name: 'bash', args: {command: 'make build'}}}, {text: 'ok'}];
 	await agent.send('go');
 	assert.ok(fs.existsSync(path.join(cwd, 'a.txt')));
 	assert.deepEqual(approvals.map(a => a.toolName), ['bash']);
-	assert.deepEqual(approvals[0]!.always, {type: 'scope', tool: 'bash', scope: 'echo', label: 'echo'});
+	assert.deepEqual(approvals[0]!.always, {type: 'scope', tool: 'bash', scope: 'make build', label: 'make build'});
 });
 
 test('plan mode blocks edits without asking, and the turn continues', async () => {
@@ -116,12 +116,30 @@ test('denying a call ends the turn', async () => {
 test('an approved command scope is not asked again', async () => {
 	const {agent, approvals} = setup('always');
 	replies = [
-		{call: {name: 'bash', args: {command: 'echo one'}}},
-		{call: {name: 'bash', args: {command: 'echo two'}}},
-		{call: {name: 'bash', args: {command: 'echo three | cat'}}},
+		{call: {name: 'bash', args: {command: 'touch one'}}},
+		{call: {name: 'bash', args: {command: 'touch two'}}},
+		{call: {name: 'bash', args: {command: 'touch three | cat'}}},
 		{text: 'ok'},
 	];
 	await agent.send('run');
-	assert.deepEqual(approvals.map(a => a.summary), ['echo one', 'echo three | cat']);
+	assert.deepEqual(approvals.map(a => a.summary), ['touch one', 'touch three | cat']);
 	assert.equal(approvals[1]!.always, undefined);
+});
+
+test('auto mode runs commands and edits without asking', async () => {
+	const {agent, cwd, approvals, toolEnds} = setup('deny');
+	agent.setMode('auto');
+	replies = [write('a.txt'), {call: {name: 'bash', args: {command: 'echo hi && echo there'}}}, {text: 'ok'}];
+	await agent.send('go');
+	assert.equal(approvals.length, 0);
+	assert.ok(fs.existsSync(path.join(cwd, 'a.txt')));
+	assert.deepEqual(toolEnds().map(e => e.type === 'tool_end' && e.status), ['ok', 'ok']);
+});
+
+test('read-only commands run without asking in ask mode', async () => {
+	const {agent, approvals, toolEnds} = setup('deny');
+	replies = [{call: {name: 'bash', args: {command: 'ls'}}}, {text: 'ok'}];
+	await agent.send('list');
+	assert.equal(approvals.length, 0);
+	assert.equal(toolEnds()[0]?.type === 'tool_end' && toolEnds()[0]!.status, 'ok');
 });
