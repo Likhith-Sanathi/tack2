@@ -29,6 +29,7 @@ On first launch you pick a model. The list shows OpenRouter models that support 
 | Input | Action |
 | --- | --- |
 | `/model` | Switch model (persists) |
+| `/compact` | Summarize the conversation so far to free up context |
 | `/clear` | Start a new conversation |
 | `/help` | Show commands and keys |
 | `/exit` | Quit |
@@ -38,6 +39,8 @@ On first launch you pick a model. The list shows OpenRouter models that support 
 **Approvals.** `write_file`, `edit_file` and `bash` ask first and show a preview: the file content, the diff, or the command. Choose **Yes** to allow that one call, **Yes, and don't ask again** to allow that tool for the rest of the session, or **No**, which stops the turn so you can tell the agent what to do instead.
 
 **Status bar.** Shows the agent state (ready, thinking, running a tool or waiting for approval), the current model, total input/output tokens, the session cost and how much of the context window the last request used. Cost comes from OpenRouter's usage report. If that's missing, it's estimated from the model's listed prices.
+
+**Long conversations.** When a request would use more than 75% of the model's context window, tack asks the model to summarize the earlier conversation (goals, decisions, files touched, commands run, what's left to do) and continues from that summary. Your latest message and the work since then are kept word for word when they fit. If the model's context size is unknown and the API rejects a request as too long, tack compacts and retries once. The chat on screen keeps the full history; only what is sent to the model shrinks.
 
 **Errors.** API errors, network failures and tool errors appear in the chat; the app keeps running. Rate limits (HTTP 429) and 5xx responses are retried up to 2 times with backoff before an error is shown.
 

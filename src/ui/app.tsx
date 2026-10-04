@@ -10,7 +10,7 @@ import {StatusBar, type Activity} from './status-bar.js';
 import {useAgent, type ChatItem} from './use-agent.js';
 
 const HELP = [
-	'Commands: /model (switch model), /clear (new conversation), /help, /exit',
+	'Commands: /model (switch model), /compact (summarize to free context), /clear (new conversation), /help, /exit',
 	'Keys: Esc interrupts the agent · Ctrl+C interrupts, or quits when idle',
 ].join('\n');
 
@@ -34,11 +34,16 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const priceUsage = (u: Usage) =>
 		modelInfo ? u.prompt_tokens * modelInfo.promptPrice + u.completion_tokens * modelInfo.completionPrice : 0;
 	const agent = useAgent({apiKey, cwd, model: model ?? '', priceUsage});
+	const {setModel: setAgentModel} = agent;
+
+	// Keep the agent's model and context window in sync (the model list may load after startup).
+	useEffect(() => {
+		if (model) setAgentModel(model, modelInfo?.contextLength);
+	}, [model, modelInfo?.contextLength, setAgentModel]);
 
 	const chooseModel = useCallback(
 		(id: string) => {
 			setModel(id);
-			agent.setModel(id);
 			setPicking(false);
 			try {
 				saveConfig({...loadConfig(), model: id});
@@ -71,6 +76,9 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 		switch (text.split(/\s+/)[0]) {
 			case '/model':
 				setPicking(true);
+				break;
+			case '/compact':
+				void agent.compact();
 				break;
 			case '/clear':
 				agent.reset();

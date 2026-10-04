@@ -10,6 +10,8 @@ export type AgentEvent =
 	| {type: 'tool_start'; id: string; name: string; summary: string}
 	| {type: 'tool_end'; id: string; status: ToolStatus; result: string}
 	| {type: 'usage'; usage: Usage}
+	/** Older messages were replaced by a summary; token counts are estimates. */
+	| {type: 'compacted'; before: number; after: number}
 	| {type: 'notice'; message: string}
 	| {type: 'error'; message: string};
 
@@ -27,6 +29,12 @@ export type AgentOptions = {
 };
 
 const MAX_RETRIES = 3;
+/** Compact when the next request is estimated to use this share of the context window. */
+const COMPACT_THRESHOLD = 0.75;
+/** Rough token estimate; good enough for deciding when to compact. */
+const CHARS_PER_TOKEN = 4;
+/** Context size assumed when the model's is unknown (only used to cap the summary request). */
+const FALLBACK_CONTEXT = 32_000;
 
 function systemPrompt(cwd: string): string {
 	return [
@@ -41,19 +49,79 @@ function systemPrompt(cwd: string): string {
 
 class Interrupted extends Error {}
 
+function isContextOverflow(error: unknown): boolean {
+	return (
+		error instanceof ApiError &&
+		(error.status === 400 || error.status === 413) &&
+		/context|too long|too many tokens|token limit|maximum.*tokens/i.test(error.message)
+	);
+}
+
+function clip(text: string, max: number): string {
+	return text.length <= max ? text : `${text.slice(0, max)} … [${text.length - max} more characters]`;
+}
+
+/** Renders messages as plain text for the summarizer, shortening tool arguments and results. */
+function transcript(messages: ChatMessage[]): string {
+	return messages
+		.map(m => {
+			switch (m.role) {
+				case 'system':
+					return '';
+				case 'user':
+					return `USER: ${m.content}`;
+				case 'assistant':
+					return [
+						m.content ? `ASSISTANT: ${m.content}` : '',
+						...(m.tool_calls ?? []).map(c => `ASSISTANT called ${c.function.name}(${clip(c.function.arguments, 500)})`),
+					]
+						.filter(Boolean)
+						.join('\n');
+				case 'tool':
+					return `TOOL RESULT: ${clip(m.content, 1500)}`;
+			}
+		})
+		.filter(Boolean)
+		.join('\n\n');
+}
+
+const SUMMARY_PROMPT = [
+	'Below is a conversation between a user and a coding agent working in their project. It is being',
+	'shortened to fit the context window. Write a summary the agent can continue from. Include:',
+	'- what the user asked for and any preferences or constraints they stated',
+	'- decisions made and why',
+	'- files read, created or changed, with the important details (paths, functions, values)',
+	'- commands run and their outcomes, including errors still unresolved',
+	'- the current state and what remains to be done, including any task in progress',
+	'Be specific and concise. Output only the summary.',
+].join('\n');
+
 /**
  * Runs the conversation loop: model -> tool calls -> tool results -> model, until the model
  * replies without tool calls. Knows nothing about the UI; it reports progress through `onEvent`.
  */
 export class Agent {
 	model: string;
+	/** The current model's context window in tokens, if known. Enables automatic compaction. */
+	contextLength: number | undefined;
 	private messages: ChatMessage[];
+	private summary = '';
+	/** Prompt tokens reported for the last request, and how many messages it contained. */
+	private lastPrompt = {tokens: 0, messageCount: 0};
 	private readonly alwaysAllowed = new Set<string>();
 	private controller: AbortController | null = null;
 
 	constructor(private readonly options: AgentOptions) {
 		this.model = options.model;
-		this.messages = [{role: 'system', content: systemPrompt(options.cwd)}];
+		this.messages = [this.systemMessage()];
+	}
+
+	private systemMessage(): ChatMessage {
+		const base = systemPrompt(this.options.cwd);
+		const content = this.summary
+			? `${base}\n\nEarlier parts of this conversation were summarized to save space:\n\n${this.summary}`
+			: base;
+		return {role: 'system', content};
 	}
 
 	get running(): boolean {
@@ -68,18 +136,37 @@ export class Agent {
 	/** Clears conversation history and session approvals. */
 	reset(): void {
 		this.interrupt();
-		this.messages = this.messages.slice(0, 1);
+		this.summary = '';
+		this.messages = [this.systemMessage()];
+		this.lastPrompt = {tokens: 0, messageCount: 0};
 		this.alwaysAllowed.clear();
 	}
 
 	/** Sends a user message and runs the agent loop until the turn ends. Never throws. */
-	async send(text: string): Promise<void> {
+	send(text: string): Promise<void> {
+		return this.run(signal => {
+			this.messages.push({role: 'user', content: text});
+			return this.loop(signal);
+		});
+	}
+
+	/** Summarizes the conversation so far to free up context. Never throws. */
+	compactNow(): Promise<void> {
+		return this.run(async signal => {
+			if (this.messages.length <= 1) {
+				this.emit({type: 'notice', message: 'Nothing to compact yet.'});
+				return;
+			}
+			await this.compact(signal, false);
+		});
+	}
+
+	private async run(task: (signal: AbortSignal) => Promise<void>): Promise<void> {
 		if (this.controller) throw new Error('Agent is already running');
 		const controller = new AbortController();
 		this.controller = controller;
-		this.messages.push({role: 'user', content: text});
 		try {
-			await this.loop(controller.signal);
+			await task(controller.signal);
 		} catch (error) {
 			if (controller.signal.aborted || error instanceof Interrupted) {
 				this.emit({type: 'notice', message: 'Interrupted.'});
@@ -103,7 +190,20 @@ export class Agent {
 		});
 
 		while (true) {
-			const result = await this.callModel(tools, signal);
+			const window = this.contextLength;
+			if (window && this.estimateTokens() > window * COMPACT_THRESHOLD) {
+				await this.compact(signal, true);
+			}
+			let result: StreamResult;
+			try {
+				result = await this.callModel(tools, signal);
+			} catch (error) {
+				// The context limit may be unknown or the estimate too low; compact once and retry.
+				if (!isContextOverflow(error)) throw error;
+				this.emit({type: 'notice', message: 'The conversation is too long for this model.'});
+				await this.compact(signal, true);
+				result = await this.callModel(tools, signal);
+			}
 			this.messages.push({
 				role: 'assistant',
 				content: result.content || null,
@@ -146,7 +246,10 @@ export class Agent {
 						this.emit({type: 'text', delta});
 					},
 				});
-				if (result.usage) this.emit({type: 'usage', usage: result.usage});
+				if (result.usage) {
+					this.lastPrompt = {tokens: result.usage.prompt_tokens, messageCount: this.messages.length};
+					this.emit({type: 'usage', usage: result.usage});
+				}
 				return result;
 			} catch (error) {
 				if (signal.aborted) {
@@ -165,6 +268,64 @@ export class Agent {
 				await sleep(delay, signal);
 			}
 		}
+	}
+
+	/** Tokens the next request will use: the last reported count plus an estimate for newer messages. */
+	private estimateTokens(): number {
+		const newer = this.messages.slice(this.lastPrompt.messageCount);
+		const chars = newer.reduce((n, m) => n + JSON.stringify(m).length, 0);
+		return this.lastPrompt.tokens + chars / CHARS_PER_TOKEN;
+	}
+
+	/**
+	 * Replaces older messages with a model-written summary kept in the system prompt.
+	 * With keepCurrentTurn, the latest user message and what followed stay verbatim if they are small.
+	 */
+	private async compact(signal: AbortSignal, keepCurrentTurn: boolean): Promise<void> {
+		const window = this.contextLength ?? FALLBACK_CONTEXT;
+		const history = this.messages.slice(1);
+
+		// The kept tail must start at a user message so no tool result loses its tool call.
+		let split = history.length;
+		if (keepCurrentTurn) {
+			const lastUser = history.findLastIndex(m => m.role === 'user');
+			const tailChars = history.slice(lastUser).reduce((n, m) => n + JSON.stringify(m).length, 0);
+			if (lastUser > 0 && tailChars / CHARS_PER_TOKEN < window * 0.25) split = lastUser;
+		}
+		const older = history.slice(0, split);
+		const tail = history.slice(split);
+		if (older.length === 0) return;
+
+		this.emit({type: 'notice', message: 'Summarizing earlier conversation to free up context…'});
+		let text = transcript(older);
+		if (this.summary) text = `SUMMARY OF EVEN EARLIER CONVERSATION:\n${this.summary}\n\n${text}`;
+		// Keep the request well inside the window; drop the oldest text if needed.
+		const maxChars = window * 0.6 * CHARS_PER_TOKEN;
+		if (text.length > maxChars) text = `[earliest part omitted]\n${text.slice(-maxChars)}`;
+
+		const result = await streamChat({
+			apiKey: this.options.apiKey,
+			model: this.model,
+			messages: [
+				{role: 'system', content: SUMMARY_PROMPT},
+				{role: 'user', content: text},
+			],
+			tools: [],
+			signal,
+			onText: () => {},
+		}).catch((error: unknown) => {
+			if (signal.aborted) throw new Interrupted();
+			throw new Error(`Could not summarize the conversation: ${error instanceof Error ? error.message : String(error)}`);
+		});
+		if (result.usage) this.emit({type: 'usage', usage: result.usage});
+		if (!result.content.trim()) throw new Error('Could not summarize the conversation: the model returned nothing.');
+
+		const before = Math.round(this.estimateTokens());
+		this.summary = result.content.trim();
+		this.messages = [this.systemMessage(), ...tail];
+		const after = Math.round(JSON.stringify(this.messages).length / CHARS_PER_TOKEN);
+		this.lastPrompt = {tokens: after, messageCount: this.messages.length};
+		this.emit({type: 'compacted', before, after});
 	}
 
 	private async runTool(call: ToolCall, signal: AbortSignal): Promise<ToolStatus> {

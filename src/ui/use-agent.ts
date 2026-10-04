@@ -17,6 +17,8 @@ const emptyUsage: UsageTotals = {promptTokens: 0, completionTokens: 0, cost: 0, 
 
 let nextId = 0;
 
+const formatK = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
 function applyEvent(items: ChatItem[], event: AgentEvent): ChatItem[] {
 	const last = items.at(-1);
 	switch (event.type) {
@@ -38,6 +40,11 @@ function applyEvent(items: ChatItem[], event: AgentEvent): ChatItem[] {
 		case 'notice':
 		case 'error':
 			return [...items, {id: nextId++, kind: event.type, text: event.message}];
+		case 'compacted':
+			return [
+				...items,
+				{id: nextId++, kind: 'info', text: `Conversation compacted: ~${formatK(event.before)} → ~${formatK(event.after)} tokens.`},
+			];
 		case 'usage':
 			return items;
 	}
@@ -70,6 +77,9 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 							lastPromptTokens: u.prompt_tokens,
 						}));
 					}
+					if (event.type === 'compacted') {
+						setUsage(prev => ({...prev, lastPromptTokens: event.after}));
+					}
 					setItems(prev => applyEvent(prev, event));
 				},
 				requestApproval: request =>
@@ -101,6 +111,12 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 		[agent],
 	);
 
+	const compact = useCallback(async () => {
+		setRunning(true);
+		await agent.compactNow();
+		setRunning(false);
+	}, [agent]);
+
 	const interrupt = useCallback(() => {
 		agent.interrupt();
 		approvalRef.current?.resolve('deny');
@@ -112,11 +128,17 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 		setUsage(emptyUsage);
 	}, [agent]);
 
-	const setModel = useCallback((model: string) => (agent.model = model), [agent]);
+	const setModel = useCallback(
+		(model: string, contextLength: number | undefined) => {
+			agent.model = model;
+			agent.contextLength = contextLength;
+		},
+		[agent],
+	);
 
 	const addNotice = useCallback((text: string, kind: 'notice' | 'error' | 'info' = 'info') => {
 		setItems(prev => [...prev, {id: nextId++, kind, text}]);
 	}, []);
 
-	return {items, running, approval, usage, send, interrupt, reset, setModel, addNotice};
+	return {items, running, approval, usage, send, compact, interrupt, reset, setModel, addNotice};
 }
