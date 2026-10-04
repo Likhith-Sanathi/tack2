@@ -11,6 +11,7 @@ export function ModelPicker(props: {
 	models: ModelInfo[] | null;
 	error: string | null;
 	current?: string;
+	rows: number;
 	onSelect: (model: string) => void;
 }) {
 	const [filter, setFilter] = useState('');
@@ -49,7 +50,7 @@ export function ModelPicker(props: {
 				{props.models !== null && options.length === 0 && (
 					<Text dimColor>No tool-capable models match. Press Enter to use "{filter.trim()}" as a model id.</Text>
 				)}
-				{options.length > 0 && <Select options={options} visibleOptionCount={10} onChange={props.onSelect} />}
+				{options.length > 0 && <Select options={options} visibleOptionCount={Math.max(3, Math.min(10, props.rows - 12))} onChange={props.onSelect} />}
 			</Box>
 		</Box>
 	);

@@ -18,7 +18,7 @@ type StaticEntry = {id: number; kind: 'header'} | ChatItem;
 
 export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; initialModel?: string}) {
 	const {exit} = useApp();
-	const {columns} = useWindowSize();
+	const {columns, rows} = useWindowSize();
 	const [model, setModel] = useState(initialModel);
 	const [picking, setPicking] = useState(!initialModel);
 	const [models, setModels] = useState<ModelInfo[] | null>(null);
@@ -126,12 +126,19 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 				}
 			</Static>
 			{liveItems.map(item => (
-				<ChatItemView key={item.id} item={item} />
+				<ChatItemView
+					key={item.id}
+					item={item}
+					width={columns}
+					// Leave room for the input box, status bar and margins so the live frame never fills the terminal.
+					maxRows={Math.max(1, rows - 9)}
+					awaitingApproval={agent.approval !== null}
+				/>
 			))}
 			{agent.approval ? (
-				<ApprovalPrompt approval={agent.approval} />
+				<ApprovalPrompt approval={agent.approval} rows={rows} />
 			) : picking ? (
-				<ModelPicker models={models} error={modelsError} current={model} onSelect={chooseModel} />
+				<ModelPicker rows={rows} models={models} error={modelsError} current={model} onSelect={chooseModel} />
 			) : (
 				<Box borderStyle="round" borderColor={agent.running ? 'gray' : 'cyan'} paddingX={1} marginTop={1}>
 					<Text color="cyan">{'› '}</Text>

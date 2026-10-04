@@ -2,6 +2,7 @@ import React from 'react';
 import {Box, Text} from 'ink';
 import {Spinner, StatusMessage} from '@inkjs/ui';
 import type {ChatItem} from './use-agent.js';
+import {tailToFit} from './fit.js';
 
 const MAX_RESULT_LINES = 6;
 
@@ -21,7 +22,18 @@ function ToolResult({text, color}: {text: string; color?: string}) {
 	);
 }
 
-export function ChatItemView({item}: {item: ChatItem}) {
+export function ChatItemView({
+	item,
+	maxRows,
+	width = 80,
+	awaitingApproval = false,
+}: {
+	item: ChatItem;
+	/** Row budget for a still-streaming message; older lines are hidden until it finishes. */
+	maxRows?: number;
+	width?: number;
+	awaitingApproval?: boolean;
+}) {
 	switch (item.kind) {
 		case 'user':
 			return (
@@ -34,22 +46,34 @@ export function ChatItemView({item}: {item: ChatItem}) {
 					</Box>
 				</Box>
 			);
-		case 'assistant':
+		case 'assistant': {
+			// Trailing spaces from a partial stream would overflow the line when wrapped.
+			const full = item.text.trimEnd();
+			const shown = maxRows === undefined ? {text: full, hidden: false} : tailToFit(full, width - 2, maxRows);
 			return (
-				<Box marginTop={1}>
-					<Text color="magenta">{'● '}</Text>
-					{/* Trailing spaces from a partial stream would overflow the line when wrapped. */}
-					<Box flexShrink={1}>
-						<Text>{item.text.trimEnd()}</Text>
+				<Box marginTop={1} flexDirection="column">
+					{shown.hidden && <Text dimColor>  … (earlier lines shown when the reply finishes)</Text>}
+					<Box>
+						<Text color="magenta">{'● '}</Text>
+						<Box flexShrink={1}>
+							<Text>{shown.text}</Text>
+						</Box>
 					</Box>
 				</Box>
 			);
+		}
 		case 'tool': {
 			const color = {running: 'yellow', ok: 'green', error: 'red', denied: 'gray', interrupted: 'gray'}[item.status];
 			return (
 				<Box marginTop={1} flexDirection="column">
 					<Box>
-						{item.status === 'running' ? <Spinner /> : <Text color={color}>●</Text>}
+						{item.status !== 'running' ? (
+							<Text color={color}>●</Text>
+						) : awaitingApproval ? (
+							<Text color="yellow">?</Text>
+						) : (
+							<Spinner />
+						)}
 						<Text>
 							{' '}
 							<Text bold color={color}>
