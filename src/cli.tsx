@@ -10,6 +10,11 @@ if (!apiKey) {
 	process.exit(1);
 }
 
+// Ink asks the terminal whether it supports the kitty keyboard protocol before its input hooks
+// switch the terminal to raw mode. Until then the terminal echoes its reply ("^[[?0u") onto the
+// screen, so enter raw mode first. Ink reads the reply later and restores the mode on exit.
+if (process.stdin.isTTY) process.stdin.setRawMode(true);
+
 render(<App apiKey={apiKey} cwd={process.cwd()} initialModel={loadConfig().model} />, {
 	exitOnCtrlC: false,
 	// Lets terminals that support it report Shift+Enter, used for new lines in the prompt.
