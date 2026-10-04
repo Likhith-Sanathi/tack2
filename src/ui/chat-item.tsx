@@ -1,8 +1,9 @@
-import React from 'react';
+import React, {useMemo} from 'react';
 import {Box, Text} from 'ink';
 import {Spinner, StatusMessage} from '@inkjs/ui';
 import type {ChatItem} from './use-agent.js';
 import {tailToFit} from './fit.js';
+import {renderMarkdown} from './markdown.js';
 
 const MAX_RESULT_LINES = 6;
 
@@ -34,6 +35,10 @@ export function ChatItemView({
 	width?: number;
 	awaitingApproval?: boolean;
 }) {
+	// Trailing spaces from a partial stream would overflow the line when wrapped.
+	const assistantText = item.kind === 'assistant' ? item.text.trimEnd() : '';
+	// Memoized because spinner ticks re-render the live area many times a second.
+	const markdown = useMemo(() => renderMarkdown(assistantText), [assistantText]);
 	switch (item.kind) {
 		case 'user':
 			return (
@@ -47,9 +52,7 @@ export function ChatItemView({
 				</Box>
 			);
 		case 'assistant': {
-			// Trailing spaces from a partial stream would overflow the line when wrapped.
-			const full = item.text.trimEnd();
-			const shown = maxRows === undefined ? {text: full, hidden: false} : tailToFit(full, width - 2, maxRows);
+			const shown = maxRows === undefined ? {text: markdown, hidden: false} : tailToFit(markdown, width - 2, maxRows);
 			return (
 				<Box marginTop={1} flexDirection="column">
 					{shown.hidden && <Text dimColor>  … (earlier lines shown when the reply finishes)</Text>}
