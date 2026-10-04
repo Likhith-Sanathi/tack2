@@ -17,6 +17,7 @@ export type PromptInputHandle = {clear: () => void};
 type Props = {
 	ref?: Ref<PromptInputHandle>;
 	placeholder: string;
+	borderColor: string;
 	/** When false, Enter is ignored (the text is kept) — e.g. while the agent is working. */
 	canSubmit: boolean;
 	/** When false, the input is hidden and ignores keys but keeps its text. */
@@ -57,7 +58,7 @@ function nextWord(value: string, cursor: number): number {
 	return i;
 }
 
-export function PromptInput({ref, placeholder, canSubmit, isActive, maxLines, history, onSubmit, onChange}: Props) {
+export function PromptInput({ref, placeholder, borderColor, canSubmit, isActive, maxLines, history, onSubmit, onChange}: Props) {
 	// Kept in a ref so several keys arriving before a re-render (fast typing) all see fresh state.
 	const state = useRef({value: '', cursor: 0});
 	// Index into history while browsing it (0 = newest), and the draft it replaced.
@@ -185,44 +186,13 @@ export function PromptInput({ref, placeholder, canSubmit, isActive, maxLines, hi
 	const matches = menuMatches(value);
 	const selected = Math.min(menu.current.selected, Math.max(0, matches.length - 1));
 	const highlighted = matches[selected]?.name;
+	const menuOpen = isActive && matches.length > 0;
 
 	return (
 		<Box flexDirection="column" display={isActive ? 'flex' : 'none'}>
-			{first > 0 && <Text dimColor>{`  ↑ ${first} more line${first === 1 ? '' : 's'}`}</Text>}
-			{shown.map((line, i) => {
-				const row = first + i;
-				const prefix = row === 0 ? <Text color="cyan">{'› '}</Text> : <Text>{'  '}</Text>;
-				if (!value) {
-					return (
-						<Box key={row}>
-							{prefix}
-							<Text>
-								<Text inverse>{placeholder[0] ?? ' '}</Text>
-								<Text dimColor>{placeholder.slice(1)}</Text>
-							</Text>
-						</Box>
-					);
-				}
-				const hasCursor = row === pos.row && isActive;
-				// Dim rest of the highlighted command after the cursor; Tab fills it in.
-				const ghost = highlighted?.startsWith(value) && cursor === value.length ? highlighted.slice(value.length) : '';
-				return (
-					<Box key={row}>
-						{prefix}
-						<Box flexShrink={1}>
-							<Text>
-								{hasCursor ? line.slice(0, pos.col) : line}
-								{hasCursor && <Text inverse>{line[pos.col] ?? ghost[0] ?? ' '}</Text>}
-								{hasCursor && line.slice(pos.col + 1)}
-								{hasCursor && ghost && <Text dimColor>{ghost.slice(1)}</Text>}
-							</Text>
-						</Box>
-					</Box>
-				);
-			})}
-			{hiddenBelow > 0 && <Text dimColor>{`  ↓ ${hiddenBelow} more line${hiddenBelow === 1 ? '' : 's'}`}</Text>}
-			{isActive && matches.length > 0 && (
-				<Box flexDirection="column" marginTop={1}>
+			{/* The command menu sits above the input box, like a popup opening upwards. */}
+			{menuOpen && (
+				<Box flexDirection="column" marginTop={1} paddingX={1}>
 					{matches.map((command, i) => {
 						const isSelected = i === selected;
 						return (
@@ -238,6 +208,41 @@ export function PromptInput({ref, placeholder, canSubmit, isActive, maxLines, hi
 					<Text dimColor>{'  ↑/↓ select · Tab complete · Enter run · Esc close'}</Text>
 				</Box>
 			)}
+			<Box flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1} marginTop={menuOpen ? 0 : 1}>
+				{first > 0 && <Text dimColor>{`  ↑ ${first} more line${first === 1 ? '' : 's'}`}</Text>}
+				{shown.map((line, i) => {
+					const row = first + i;
+					const prefix = row === 0 ? <Text color="cyan">{'› '}</Text> : <Text>{'  '}</Text>;
+					if (!value) {
+						return (
+							<Box key={row}>
+								{prefix}
+								<Text>
+									<Text inverse>{placeholder[0] ?? ' '}</Text>
+									<Text dimColor>{placeholder.slice(1)}</Text>
+								</Text>
+							</Box>
+						);
+					}
+					const hasCursor = row === pos.row && isActive;
+					// Dim rest of the highlighted command after the cursor; Tab fills it in.
+					const ghost = highlighted?.startsWith(value) && cursor === value.length ? highlighted.slice(value.length) : '';
+					return (
+						<Box key={row}>
+							{prefix}
+							<Box flexShrink={1}>
+								<Text>
+									{hasCursor ? line.slice(0, pos.col) : line}
+									{hasCursor && <Text inverse>{line[pos.col] ?? ghost[0] ?? ' '}</Text>}
+									{hasCursor && line.slice(pos.col + 1)}
+									{hasCursor && ghost && <Text dimColor>{ghost.slice(1)}</Text>}
+								</Text>
+							</Box>
+						</Box>
+					);
+				})}
+				{hiddenBelow > 0 && <Text dimColor>{`  ↓ ${hiddenBelow} more line${hiddenBelow === 1 ? '' : 's'}`}</Text>}
+			</Box>
 		</Box>
 	);
 }

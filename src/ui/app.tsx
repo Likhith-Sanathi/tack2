@@ -175,15 +175,10 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 				picking && <ModelPicker rows={rows} models={models} error={modelsError} current={model} onSelect={chooseModel} />
 			)}
 			{/* Stays mounted while hidden so a draft survives approval prompts and the model picker. */}
-			<Box
-				display={inputActive ? 'flex' : 'none'}
-				borderStyle="round"
-				borderColor={agent.running ? 'gray' : 'cyan'}
-				paddingX={1}
-				marginTop={1}
-			>
+			<Box display={inputActive ? 'flex' : 'none'} flexDirection="column">
 				<PromptInput
 					ref={input}
+					borderColor={agent.running ? 'gray' : 'cyan'}
 					isActive={inputActive}
 					canSubmit={!agent.running}
 					maxLines={maxInputLines}
