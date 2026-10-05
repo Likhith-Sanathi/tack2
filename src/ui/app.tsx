@@ -182,7 +182,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 				{entry => (
 					// Static output is laid out without a parent width, so give it one explicitly for wrapping.
 					<Box key={entry.id} width={columns}>
-						<ChatItemView item={entry} />
+						<ChatItemView item={entry} width={columns} />
 					</Box>
 				)}
 			</Static>

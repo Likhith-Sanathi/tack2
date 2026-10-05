@@ -28,7 +28,7 @@ function alwaysLabel(option: AlwaysOption, summary: string): string {
 export function ApprovalPrompt({approval, rows, columns}: {approval: PendingApproval; rows: number; columns: number}) {
 	const {preview} = approval;
 	const previewLines = Math.max(0, Math.min(MAX_PREVIEW_LINES, rows - CHROME_ROWS));
-	const innerWidth = columns - 4; // border and padding
+	const innerWidth = columns - 2; // the panel's horizontal padding
 	const options = [
 		{label: 'Yes', value: 'once'},
 		...(approval.always ? [{label: alwaysLabel(approval.always, approval.summary), value: 'always'}] : []),
