@@ -53,33 +53,6 @@ test('glob lists the most recently modified files first', async () => {
 	assert.equal((await glob.run({pattern: '*.ts'}, ctx(dir))).split('\n')[0], 'src/a.ts');
 });
 
-test('search skips ignored, excluded and dependency files', async () => {
-	const dir = project();
-	const out = await search.run({pattern: 'TODO'}, ctx(dir));
-	assert.deepEqual(out.split('\n'), ['README.md:2: TODO docs', 'src/a.ts:4: // TODO later']);
-});
-
-test('search shows context lines, merging nearby matches', async () => {
-	const dir = project();
-	const out = await search.run({pattern: 'one =|two', path: 'src/a.ts', context: 1}, ctx(dir));
-	assert.deepEqual(out.split('\n'), ['src/a.ts:1: const one = 1;', 'src/a.ts:2: const two = 2;', 'src/a.ts-3- const three = 3;']);
-	const apart = await search.run({pattern: 'one', path: 'src', context: 0}, ctx(dir));
-	assert.deepEqual(apart.split('\n'), ['a.ts:1: const one = 1;', 'a.ts:5: export {one};']);
-	const groups = await search.run({pattern: '^const one|^export', path: 'src/a.ts', context: 1}, ctx(dir));
-	assert.deepEqual(groups.split('\n'), [
-		'src/a.ts:1: const one = 1;',
-		'src/a.ts-2- const two = 2;',
-		'--',
-		'src/a.ts-4- // TODO later',
-		'src/a.ts:5: export {one};',
-	]);
-});
-
-test('search can list just the matching files', async () => {
-	const dir = project();
-	assert.equal(await search.run({pattern: 'const', files_only: true, glob: 'src/*.ts'}, ctx(dir)), 'src/a.ts (3 matches)');
-});
-
 test('list_dir marks ignored directories without entering them', async () => {
 	const dir = project();
 	const out = (await listDir.run({recursive: true}, ctx(dir))).split('\n');
@@ -141,8 +114,74 @@ test('a background command that exits quickly reports its exit code', async () =
 	await assert.rejects(bashOutput.run({id: 'nope'}, ctx(project())), /No background process "nope"/);
 });
 
-test('search context stops at the last line of the file', async () => {
+
+/** Runs the same search tests against ripgrep and the JavaScript fallback; their output must match. */
+function use(engine: string) {
+	if (engine === 'javascript') process.env.TACK_NO_RIPGREP = '1';
+	else delete process.env.TACK_NO_RIPGREP;
+}
+
+for (const engine of ['ripgrep', 'javascript']) {
+	test(`${engine}: search skips ignored, excluded and dependency files`, async () => {
+			use(engine);
+		const dir = project();
+		const out = await search.run({pattern: 'TODO'}, ctx(dir));
+		assert.deepEqual(out.split('\n'), ['README.md:2: TODO docs', 'src/a.ts:4: // TODO later']);
+	});
+
+	test(`${engine}: search shows context lines, merging nearby matches`, async () => {
+			use(engine);
+		const dir = project();
+		const out = await search.run({pattern: 'one =|two', path: 'src/a.ts', context: 1}, ctx(dir));
+		assert.deepEqual(out.split('\n'), ['src/a.ts:1: const one = 1;', 'src/a.ts:2: const two = 2;', 'src/a.ts-3- const three = 3;']);
+		const apart = await search.run({pattern: 'one', path: 'src', context: 0}, ctx(dir));
+		assert.deepEqual(apart.split('\n'), ['a.ts:1: const one = 1;', 'a.ts:5: export {one};']);
+		const groups = await search.run({pattern: '^const one|^export', path: 'src/a.ts', context: 1}, ctx(dir));
+		assert.deepEqual(groups.split('\n'), [
+			'src/a.ts:1: const one = 1;',
+			'src/a.ts-2- const two = 2;',
+			'--',
+			'src/a.ts-4- // TODO later',
+			'src/a.ts:5: export {one};',
+		]);
+	});
+
+	test(`${engine}: search can list just the matching files`, async () => {
+			use(engine);
+		const dir = project();
+		assert.equal(await search.run({pattern: 'const', files_only: true, glob: 'src/*.ts'}, ctx(dir)), 'src/a.ts (3 matches)');
+	});
+
+	test(`${engine}: search context stops at the last line of the file`, async () => {
+			use(engine);
+		const dir = project();
+		const out = await search.run({pattern: 'export', path: 'src/a.ts', context: 2}, ctx(dir));
+		assert.deepEqual(out.split('\n'), ['src/a.ts-3- const three = 3;', 'src/a.ts-4- // TODO later', 'src/a.ts:5: export {one};']);
+	});
+
+	test(`${engine}: lookbehind and backreferences work`, async () => {
+		use(engine);
+		const dir = project();
+		assert.equal(await search.run({pattern: '(?<=const )two', path: 'src/a.ts'}, ctx(dir)), 'src/a.ts:2: const two = 2;');
+		fs.writeFileSync(path.join(dir, 'dup.txt'), 'the the cat\nno repeats\n');
+		assert.equal(await search.run({pattern: '\\b(\\w+) \\1\\b', path: 'dup.txt'}, ctx(dir)), 'dup.txt:1: the the cat');
+	});
+
+	test(`${engine}: ignore_case and hidden files`, async () => {
+		use(engine);
+		const dir = project();
+		fs.writeFileSync(path.join(dir, '.env.example'), 'API_KEY=todo\n');
+		const out = await search.run({pattern: 'todo', ignore_case: true, files_only: true}, ctx(dir));
+		assert.deepEqual(out.split('\n').sort(), ['.env.example (1 match)', 'README.md (1 match)', 'src/a.ts (1 match)']);
+	});
+}
+
+test('ripgrep is bundled and actually used', async () => {
 	const dir = project();
-	const out = await search.run({pattern: 'export', path: 'src/a.ts', context: 2}, ctx(dir));
-	assert.deepEqual(out.split('\n'), ['src/a.ts-3- const three = 3;', 'src/a.ts-4- // TODO later', 'src/a.ts:5: export {one};']);
+	// `(?i)` is valid for ripgrep but a syntax error in JavaScript, so this only passes through ripgrep.
+	delete process.env.TACK_NO_RIPGREP;
+	assert.equal(await search.run({pattern: '(?i)# readme', path: 'README.md'}, ctx(dir)), 'README.md:1: # Readme');
+	process.env.TACK_NO_RIPGREP = '1';
+	await assert.rejects(search.run({pattern: '(?i)# readme', path: 'README.md'}, ctx(dir)), /Invalid regular expression/);
+	delete process.env.TACK_NO_RIPGREP;
 });

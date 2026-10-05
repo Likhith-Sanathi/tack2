@@ -86,7 +86,7 @@ Session approvals are cleared by `/clear`; the mode is kept.
 | --- | --- | --- |
 | `read_file` | read | Read a file with line numbers (supports offset/limit) |
 | `glob` | read | Find files by name pattern (`**/*.test.ts`), most recently modified first |
-| `search` | read | Regex search across files, with optional glob filter, context lines (`context`) or just the matching files (`files_only`) |
+| `search` | read | Regex search across files using a bundled ripgrep, with optional glob filter, context lines (`context`) or just the matching files (`files_only`) |
 | `list_dir` | read | List a directory, optionally recursive |
 | `write_file` | edit | Create or overwrite a file |
 | `edit_file` | edit | Replace an exact, unique string in a file |
@@ -96,7 +96,7 @@ Session approvals are cleared by `/clear`; the mode is kept.
 | `bash_output` | read | Read what a background process printed since the last read, optionally waiting for new output; without an id, list them |
 | `kill_process` | execute (no approval) | Stop a background process and anything it started |
 
-`glob`, `search` and recursive `list_dir` skip what git ignores: `.gitignore` files at every level and `.git/info/exclude`, plus `.git`, `node_modules` and a few build directories even without a `.gitignore`. Background processes are stopped when tack exits. `kill_process` needs no approval because it can only stop processes the agent started.
+`glob`, `search` and recursive `list_dir` skip what git ignores: `.gitignore` files at every level and `.git/info/exclude`, plus `.git`, `node_modules` and a few build directories even without a `.gitignore`. `search` runs ripgrep, which comes with tack via `@vscode/ripgrep` (npm installs the right binary for your platform), so it's fast in large repos and behaves the same on every machine. It uses ripgrep's `--engine auto`, so lookarounds and backreferences work too. If the binary is missing or ripgrep rejects a pattern, `search` falls back to a built-in JavaScript search that produces the same output (set `TACK_NO_RIPGREP=1` to force it). Background processes are stopped when tack exits. `kill_process` needs no approval because it can only stop processes the agent started.
 
 ### Adding a tool
 
