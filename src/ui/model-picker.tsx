@@ -128,6 +128,8 @@ export function ModelPicker(props: Props) {
 	const [providersError, setProvidersError] = useState<string | null>(null);
 	const [providerIndex, setProviderIndex] = useState(0);
 	const [providerFilter, setProviderFilter] = useState('');
+	/** Why the highlighted provider can't be chosen, after trying to. */
+	const [providerNote, setProviderNote] = useState<string | null>(null);
 	/** Providers matching the filter; Auto is always listed above them. */
 	const shownProviders = useMemo(
 		() => (providers ?? []).filter(p => matches(providerFilter, `${p.name} ${p.slug} ${p.quantization ?? ''}`)),
@@ -135,6 +137,7 @@ export function ModelPicker(props: Props) {
 	);
 	// While filtering, highlight the first matching provider rather than Auto.
 	useEffect(() => {
+		setProviderNote(null);
 		setProviderIndex(providerFilter.trim() && shownProviders.length > 0 ? 1 : 0);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [providerFilter]);
@@ -160,11 +163,12 @@ export function ModelPicker(props: Props) {
 		setProviderFilter('');
 		props.loadProviders(chosen, controller.signal).then(
 			list => {
-				const usable = list.filter(p => p.supportsTools);
-				setProviders(usable);
+				// Providers without tool calling are listed last, with the reason, rather than hidden.
+				const sorted = [...list.filter(p => p.supportsTools), ...list.filter(p => !p.supportsTools)];
+				setProviders(sorted);
 				// Start on the provider used last time for this model, else Auto.
 				const saved = props.saved[chosen]?.provider;
-				setProviderIndex(Math.max(0, usable.findIndex(p => p.slug === saved) + 1));
+				setProviderIndex(Math.max(0, sorted.findIndex(p => p.slug === saved) + 1));
 			},
 			(error: Error) => {
 				if (!controller.signal.aborted) {
@@ -197,9 +201,18 @@ export function ModelPicker(props: Props) {
 		if (step === 'provider') {
 			const count = shownProviders.length + 1; // Auto first
 			if (key.escape) setStep('model');
-			else if (key.upArrow) setProviderIndex(i => Math.max(0, i - 1));
-			else if (key.downArrow) setProviderIndex(i => Math.min(count - 1, i + 1));
-			else if (key.return && providers !== null) choose(providerIndex === 0 ? undefined : shownProviders[providerIndex - 1]);
+			else if (key.upArrow || key.downArrow) {
+				setProviderNote(null);
+				setProviderIndex(i => Math.max(0, Math.min(count - 1, i + (key.upArrow ? -1 : 1))));
+			}
+			else if (key.return && providers !== null) {
+				const provider = providerIndex === 0 ? undefined : shownProviders[providerIndex - 1];
+				if (provider && !provider.supportsTools) {
+					setProviderNote(`${provider.name} doesn't offer tool calling for this model, which tack needs. Pick another provider or Auto.`);
+				} else {
+					choose(provider);
+				}
+			}
 			else editFilter(input, key, setProviderFilter);
 			return;
 		}
@@ -234,9 +247,10 @@ export function ModelPicker(props: Props) {
 				<Text bold>Auto</Text>
 				<Text dimColor>{'  OpenRouter picks the best available provider and falls back if one fails'}</Text>
 			</Text>,
-			...shownProviders.map(p => (
-				<Text key={p.slug} wrap="truncate-end">
-					<Text bold>{p.name}</Text>
+			...shownProviders.map((p, i) => (
+				<Text key={`${p.slug}-${i}`} wrap="truncate-end" dimColor={!p.supportsTools}>
+					<Text bold={p.supportsTools}>{p.name}</Text>
+					{!p.supportsTools && <Text color="yellow">{'  no tool calling'}</Text>}
 					<Text dimColor>
 						{'  '}
 						{[p.slug, prices(p.promptPrice, p.completionPrice), context(p.contextLength), p.quantization, p.uptime !== undefined ? uptime(p.uptime) : '']
@@ -264,6 +278,7 @@ export function ModelPicker(props: Props) {
 								<Text dimColor>No providers match "{providerFilter.trim()}"; Auto is still available.</Text>
 							)}
 							<ScrollList rows={rows} index={providerIndex} visible={visible} />
+							{providerNote && <Text color="yellow">{providerNote}</Text>}
 						</>
 					)}
 				</Box>

@@ -253,6 +253,10 @@ export async function listModels(apiKey: string): Promise<ModelInfo[]> {
 		.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+function slugify(name: string): string {
+	return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
 /** Providers serving a model, cheapest first. */
 export async function listProviders(apiKey: string, modelId: string, signal?: AbortSignal): Promise<ProviderInfo[]> {
 	const res = await request(`${BASE_URL}/models/${modelId}/endpoints`, {headers: headers(apiKey), signal});
@@ -272,10 +276,16 @@ export async function listProviders(apiKey: string, modelId: string, signal?: Ab
 		};
 	};
 	return (body.data?.endpoints ?? [])
-		.filter((e): e is typeof e & {tag: string} => typeof e.tag === 'string' && e.tag !== '')
+		.flatMap(e => {
+			// The tag is the routing slug. If it's missing, OpenRouter's slugs follow the provider's name
+			// (e.g. "Cerebras" -> "cerebras"), so derive one rather than dropping the provider.
+			const name = e.provider_name ?? e.name;
+			const slug = typeof e.tag === 'string' && e.tag ? e.tag : name ? slugify(name) : '';
+			return slug ? [{...e, slug, name: name ?? slug}] : [];
+		})
 		.map(e => ({
-			slug: e.tag,
-			name: e.provider_name ?? e.name ?? e.tag,
+			slug: e.slug,
+			name: e.name,
 			contextLength: e.context_length ?? 0,
 			promptPrice: Number(e.pricing?.prompt ?? 0),
 			completionPrice: Number(e.pricing?.completion ?? 0),
