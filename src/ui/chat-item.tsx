@@ -73,6 +73,8 @@ export function ChatItemView({
 				</Box>
 			);
 		case 'assistant': {
+			// A reply that so far is only whitespace (e.g. a newline before a tool call) has nothing to show.
+			if (item.text.trim() === '') return null;
 			const shown = maxRows === undefined ? {text: markdown, hidden: false} : tailToFit(markdown, width - 2, maxRows);
 			return (
 				<Box marginTop={1} flexDirection="column">

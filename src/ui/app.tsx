@@ -236,6 +236,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 				activity={activity}
 				mode={agent.mode}
 				web={web}
+				width={columns}
 				usage={agent.usage}
 				contextLength={contextLength}
 			/>
