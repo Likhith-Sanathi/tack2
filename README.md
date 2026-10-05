@@ -33,7 +33,7 @@ On first launch you pick a model. The list shows OpenRouter models that support 
 | `/compact` | Summarize the conversation so far to free up context |
 | `/clear` | Start a new conversation |
 | `/help` | Show commands and keys |
-| `/exit` | Quit |
+| `/exit`, `/quit`, `/q` | Quit |
 | `Enter` | Send |
 | `Shift+Enter`, `Option/Alt+Enter`, `Ctrl+J`, or `\` then `Enter` | New line (Shift+Enter needs a terminal with the kitty keyboard protocol, e.g. kitty, Ghostty, WezTerm, iTerm2) |
 | `↑` / `↓` | Move between lines; at the first/last line, browse previous prompts |

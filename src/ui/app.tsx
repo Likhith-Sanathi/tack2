@@ -8,10 +8,10 @@ import {ModelPicker} from './model-picker.js';
 import {StatusBar, type Activity} from './status-bar.js';
 import {PromptInput, type PromptInputHandle} from './prompt-input.js';
 import {useAgent} from './use-agent.js';
-import {matchCommands} from './commands.js';
+import {matchCommands, resolveCommand} from './commands.js';
 
 const HELP = [
-	'Commands: /model (switch model), /compact (summarize to free context), /clear (new conversation), /help, /exit',
+	'Commands: /model (switch model), /compact (summarize to free context), /clear (new conversation), /help, /exit (or /quit, /q)',
 	'Keys: Enter sends · Shift+Enter, Option+Enter, Ctrl+J or \\ then Enter adds a new line · ↑/↓ history',
 	'      Shift+Tab cycles permission modes: ask → auto-accept edits → plan (read-only) → auto (no approvals)',
 	'      Esc interrupts the agent · Ctrl+C interrupts, clears the input, or quits when idle',
@@ -89,7 +89,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 			void agent.send(text);
 			return;
 		}
-		switch (text.split(/\s+/)[0]) {
+		switch (resolveCommand(text.split(/\s+/)[0]!)) {
 			case '/model':
 				setPicking(true);
 				break;
@@ -105,7 +105,6 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 				agent.addNotice(HELP);
 				break;
 			case '/exit':
-			case '/quit':
 				exit();
 				break;
 			default:
