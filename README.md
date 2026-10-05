@@ -85,11 +85,18 @@ Session approvals are cleared by `/clear`; the mode is kept.
 | Tool | Kind | Description |
 | --- | --- | --- |
 | `read_file` | read | Read a file with line numbers (supports offset/limit) |
+| `glob` | read | Find files by name pattern (`**/*.test.ts`), most recently modified first |
+| `search` | read | Regex search across files, with optional glob filter, context lines (`context`) or just the matching files (`files_only`) |
 | `list_dir` | read | List a directory, optionally recursive |
-| `search` | read | Regex search across files, optional glob filter |
 | `write_file` | edit | Create or overwrite a file |
 | `edit_file` | edit | Replace an exact, unique string in a file |
+| `multi_edit` | edit | Several replacements in one file, applied in order; all succeed or nothing is written |
 | `bash` | execute | Run a shell command (timeout 2 min by default; killed on interrupt). Stdin is closed and pagers and git credential prompts are disabled, so commands can't hang waiting for input |
+| `bash_background` | execute | Start a long-running command (dev server, watcher) and return right away with an id and its first output |
+| `bash_output` | read | Read what a background process printed since the last read, optionally waiting for new output; without an id, list them |
+| `kill_process` | execute (no approval) | Stop a background process and anything it started |
+
+`glob`, `search` and recursive `list_dir` skip what git ignores: `.gitignore` files at every level and `.git/info/exclude`, plus `.git`, `node_modules` and a few build directories even without a `.gitignore`. Background processes are stopped when tack exits. `kill_process` needs no approval because it can only stop processes the agent started.
 
 ### Adding a tool
 
