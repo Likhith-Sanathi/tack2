@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useState} from 'react';
-import {Box, Text, useInput} from 'ink';
+import {Box, Text, useInput, type Key} from 'ink';
 import {Spinner} from '@inkjs/ui';
 import type {ModelInfo, ProviderInfo} from '../agent/openrouter.js';
 import {defaultThinking, thinkingLabel, thinkingLevels} from '../agent/thinking.js';
@@ -48,6 +48,44 @@ function ScrollList({rows, index, visible}: {rows: React.ReactNode[]; index: num
 	);
 }
 
+/**
+ * A filter field. With no text, the cursor sits on the placeholder's first letter (as in the main
+ * prompt) rather than after it.
+ */
+function FilterLine({value, placeholder}: {value: string; placeholder: string}) {
+	return (
+		<Box>
+			<Text color="blue">{'filter: '}</Text>
+			{value ? (
+				<Text>
+					{value}
+					<Text inverse> </Text>
+				</Text>
+			) : (
+				<Text>
+					<Text inverse>{placeholder[0]}</Text>
+					<Text dimColor>{placeholder.slice(1)}</Text>
+				</Text>
+			)}
+		</Box>
+	);
+}
+
+/** Applies typing, Backspace and Ctrl+U to a filter. Returns false for keys it doesn't handle. */
+function editFilter(input: string, key: Key, setFilter: (update: (filter: string) => string) => void): boolean {
+	if (key.backspace || key.delete) setFilter(f => f.slice(0, -1));
+	else if (key.ctrl && input === 'u') setFilter(() => '');
+	else if (input && !key.ctrl && !key.meta && !key.tab && !key.escape) setFilter(f => f + input.replace(/[\r\n]/g, ''));
+	else return false;
+	return true;
+}
+
+/** True if every word of the filter appears somewhere in `text`. */
+function matches(filter: string, text: string): boolean {
+	const haystack = text.toLowerCase();
+	return filter.toLowerCase().split(/\s+/).filter(Boolean).every(term => haystack.includes(term));
+}
+
 /** The thinking levels for a model, with the current one highlighted. */
 function ThinkingSlider({model, level, isDefault}: {model: ModelInfo | undefined; level?: string; isDefault: boolean}) {
 	const levels = model ? thinkingLevels(model) : [];
@@ -89,12 +127,20 @@ export function ModelPicker(props: Props) {
 	const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
 	const [providersError, setProvidersError] = useState<string | null>(null);
 	const [providerIndex, setProviderIndex] = useState(0);
+	const [providerFilter, setProviderFilter] = useState('');
+	/** Providers matching the filter; Auto is always listed above them. */
+	const shownProviders = useMemo(
+		() => (providers ?? []).filter(p => matches(providerFilter, `${p.name} ${p.slug} ${p.quantization ?? ''}`)),
+		[providers, providerFilter],
+	);
+	// While filtering, highlight the first matching provider rather than Auto.
+	useEffect(() => {
+		setProviderIndex(providerFilter.trim() && shownProviders.length > 0 ? 1 : 0);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [providerFilter]);
 
 	const options = useMemo(() => {
-		const terms = filter.toLowerCase().split(/\s+/).filter(Boolean);
-		return (props.models ?? [])
-			.filter(m => m.supportsTools)
-			.filter(m => terms.every(t => `${m.id} ${m.name}`.toLowerCase().includes(t)));
+		return (props.models ?? []).filter(m => m.supportsTools && matches(filter, `${m.id} ${m.name}`));
 	}, [props.models, filter]);
 
 	// Start on the current model once the list has loaded.
@@ -111,6 +157,7 @@ export function ModelPicker(props: Props) {
 		const controller = new AbortController();
 		setProviders(null);
 		setProvidersError(null);
+		setProviderFilter('');
 		props.loadProviders(chosen, controller.signal).then(
 			list => {
 				const usable = list.filter(p => p.supportsTools);
@@ -148,11 +195,12 @@ export function ModelPicker(props: Props) {
 
 	useInput((input, key) => {
 		if (step === 'provider') {
-			const count = (providers?.length ?? 0) + 1; // Auto first
+			const count = shownProviders.length + 1; // Auto first
 			if (key.escape) setStep('model');
 			else if (key.upArrow) setProviderIndex(i => Math.max(0, i - 1));
 			else if (key.downArrow) setProviderIndex(i => Math.min(count - 1, i + 1));
-			else if (key.return && providers !== null) choose(providerIndex === 0 ? undefined : providers[providerIndex - 1]);
+			else if (key.return && providers !== null) choose(providerIndex === 0 ? undefined : shownProviders[providerIndex - 1]);
+			else editFilter(input, key, setProviderFilter);
 			return;
 		}
 
@@ -173,20 +221,7 @@ export function ModelPicker(props: Props) {
 			setStep('provider');
 			return;
 		}
-		if (key.backspace || key.delete) {
-			setFilter(f => f.slice(0, -1));
-			setIndex(0);
-			return;
-		}
-		if (key.ctrl && input === 'u') {
-			setFilter('');
-			setIndex(0);
-			return;
-		}
-		if (input && !key.ctrl && !key.meta && !key.tab) {
-			setFilter(f => f + input.replace(/[\r\n]/g, ''));
-			setIndex(0);
-		}
+		if (editFilter(input, key, setFilter)) setIndex(0);
 	});
 
 	const visible = Math.max(3, Math.min(10, props.rows - 16));
@@ -199,7 +234,7 @@ export function ModelPicker(props: Props) {
 				<Text bold>Auto</Text>
 				<Text dimColor>{'  OpenRouter picks the best available provider and falls back if one fails'}</Text>
 			</Text>,
-			...(providers ?? []).map(p => (
+			...shownProviders.map(p => (
 				<Text key={p.slug} wrap="truncate-end">
 					<Text bold>{p.name}</Text>
 					<Text dimColor>
@@ -217,13 +252,17 @@ export function ModelPicker(props: Props) {
 					Provider for {chosen}
 					{level ? <Text dimColor>{`  · thinking: ${thinkingLabel(level)}`}</Text> : null}
 				</Text>
-				<Text dimColor>↑/↓ to move, Enter to choose, Esc to go back to models.</Text>
+				<Text dimColor>Type to filter, ↑/↓ to move, Enter to choose, Esc to go back to models.</Text>
+				<FilterLine value={providerFilter} placeholder="e.g. deepinfra, fp8, together" />
 				<Box flexDirection="column">
 					{providers === null ? (
 						<Spinner label="Loading providers…" />
 					) : (
 						<>
 							{providersError && <Text color="red">Could not load providers ({providersError}); Auto still works.</Text>}
+							{!providersError && providers.length > 0 && shownProviders.length === 0 && (
+								<Text dimColor>No providers match "{providerFilter.trim()}"; Auto is still available.</Text>
+							)}
 							<ScrollList rows={rows} index={providerIndex} visible={visible} />
 						</>
 					)}
@@ -246,9 +285,7 @@ export function ModelPicker(props: Props) {
 				Type to filter, ↑/↓ to move, ←/→ to set thinking, Enter for providers{props.onCancel ? ', Esc to cancel' : ''}.
 			</Text>
 			<Box>
-				<Text color="blue">{'filter: '}</Text>
-				{filter ? <Text>{filter}</Text> : <Text dimColor>e.g. claude, gpt, qwen coder</Text>}
-				<Text inverse> </Text>
+				<FilterLine value={filter} placeholder="e.g. claude, gpt, qwen coder" />
 			</Box>
 			<Box flexDirection="column">
 				{props.models === null && !props.error && <Spinner label="Loading models from OpenRouter…" />}

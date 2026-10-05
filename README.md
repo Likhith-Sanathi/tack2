@@ -27,7 +27,7 @@ The agent works in the directory you start it from. File tools refuse paths outs
 On first launch you pick a model, in two steps:
 
 1. **Model.** The list shows OpenRouter models that support tool calling, with prices and context size. Type to filter, `↑`/`↓` to move. `←`/`→` set the **thinking level** for the highlighted model, using the levels OpenRouter lists for it (e.g. off · low · medium · high · extra high · max, or just off/on). Models that don't let you change it say so. Until you change it, the model's own default is used. If nothing matches the filter, `Enter` uses what you typed as a model id.
-2. **Provider.** `Enter` lists the providers serving that model, with price, context size, quantization and recent uptime. **Auto**, the first option, lets OpenRouter choose and fall back to another provider if one fails. Picking a provider pins every request to it with no fallback, so if it's down you'll see the error. `Esc` goes back to the model list.
+2. **Provider.** `Enter` lists the providers serving that model, with price, context size, quantization and recent uptime. Type to filter them by name, slug or quantization (e.g. `fp8`). **Auto**, the first option, lets OpenRouter choose and fall back to another provider if one fails. Picking a provider pins every request to it with no fallback, so if it's down you'll see the error. `Esc` goes back to the model list.
 
 Your choices are saved in `~/.config/tack/config.json` (or `$XDG_CONFIG_HOME/tack/`): the current model, plus the thinking level and provider for each model you've used, which the picker remembers next time. The status bar shows them, e.g. `deepseek/deepseek-v4 (high, via DeepInfra)`.
 
