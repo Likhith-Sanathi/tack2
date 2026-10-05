@@ -10,7 +10,7 @@ test('a lone "/" lists every command', () => {
 
 test('prefix matches come before other matches', () => {
 	assert.deepEqual(names('/c'), ['/compact', '/clear']);
-	assert.deepEqual(names('/e'), ['/exit', '/model', '/clear', '/help']);
+	assert.deepEqual(names('/e'), ['/exit', '/model', '/web', '/clear', '/help']);
 	assert.deepEqual(names('/mod'), ['/model']);
 });
 

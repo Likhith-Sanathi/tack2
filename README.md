@@ -35,6 +35,7 @@ Your choices are saved in `~/.config/tack/config.json` (or `$XDG_CONFIG_HOME/tac
 | --- | --- |
 | `/` | Open the command menu: type to filter, `↑`/`↓` to pick, `Tab` (or `→`) to fill in, `Enter` to run, `Esc` to close |
 | `/model` | Switch model, thinking level and provider (saved) |
+| `/web` | Turn web search and page fetching on or off (saved) |
 | `/compact` | Summarize the conversation so far to free up context |
 | `/clear` | Start a new conversation |
 | `/help` | Show commands and keys |
@@ -72,6 +73,8 @@ Session approvals are cleared by `/clear`; the mode is kept.
 **While it works.** Models that expose their reasoning show it live under "Thinking…", collapsed to "Thought for Ns" once they answer. Commands show their latest output lines as they run. After a file change, the chat shows its diff.
 
 **Status bar.** Shows the agent state (ready, thinking, running a tool or waiting for approval), the current model, total input/output tokens, the session cost and how much of the context window the last request used. Cost comes from OpenRouter's usage report. If that's missing, it's estimated from the model's listed prices.
+
+**Web.** The model can search the web and read pages through OpenRouter's built-in server tools, `openrouter:web_search` and `openrouter:web_fetch`, both using Exa. The model decides when to use them and OpenRouter runs them during the request, so they need no approval and work in every permission mode. Each search costs about $0.007 (Exa, up to 10 results) and each page fetch about $0.001, included in the cost shown in the status bar. Searches appear in the chat above the reply, and the pages the model cited are listed under it. Web access is on by default; `/web` turns it off and on, and the status bar shows `· web` while it's on.
 
 **Long conversations.** When a request would use more than 75% of the model's context window, tack asks the model to summarize the earlier conversation (goals, decisions, files touched, commands run, what's left to do) and continues from that summary. Your latest message and the work since then are kept word for word when they fit. If the model's context size is unknown and the API rejects a request as too long, tack compacts and retries once. The chat on screen keeps the full history; only what is sent to the model shrinks.
 

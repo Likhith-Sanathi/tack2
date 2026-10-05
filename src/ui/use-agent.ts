@@ -1,6 +1,6 @@
 import {useCallback, useMemo, useRef, useState} from 'react';
 import {Agent, type AgentEvent, type ApprovalDecision, type ApprovalRequest, type ToolStatus} from '../agent/agent.js';
-import type {Usage} from '../agent/openrouter.js';
+import type {Citation, Usage} from '../agent/openrouter.js';
 import {nextMode, type PermissionMode} from '../agent/permissions.js';
 import {tools, type ToolPreview} from '../tools/index.js';
 
@@ -20,6 +20,7 @@ export type ChatItem =
 			output?: string;
 			result?: string;
 	  }
+	| {id: number; kind: 'sources'; sources: Citation[]}
 	| {id: number; kind: 'notice' | 'error' | 'info'; text: string};
 
 export type PendingApproval = ApprovalRequest & {resolve: (decision: ApprovalDecision) => void};
@@ -97,6 +98,16 @@ function applyEvent(current: ChatItem[], event: AgentEvent): ChatItem[] {
 				...items,
 				{id: nextId++, kind: 'info', text: `Conversation compacted: ~${formatK(event.before)} → ~${formatK(event.after)} tokens.`},
 			];
+		case 'web': {
+			// Run by OpenRouter during the response, so it's already finished. It happened before the
+			// reply was written, so it goes above the reply that's still streaming.
+			const id = nextId++;
+			const item: ChatItem = {id, kind: 'tool', callId: `web-${id}`, name: event.name, summary: event.summary, status: 'ok'};
+			if (last?.kind === 'assistant' && !last.done) return [...items.slice(0, -1), item, last];
+			return [...items, item];
+		}
+		case 'sources':
+			return [...items, {id: nextId++, kind: 'sources', sources: event.sources}];
 	}
 }
 
@@ -207,5 +218,7 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 
 	const cycleMode = useCallback(() => agent.setMode(nextMode(agent.mode)), [agent]);
 
-	return {items, running, approval, usage, mode, cycleMode, send, compact, interrupt, reset, setModel, addNotice};
+	const setWeb = useCallback((enabled: boolean) => (agent.web = enabled), [agent]);
+
+	return {items, running, approval, usage, mode, cycleMode, send, compact, interrupt, reset, setModel, setWeb, addNotice};
 }

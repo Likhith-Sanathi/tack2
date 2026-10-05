@@ -8,10 +8,10 @@ import path from 'node:path';
 import type {AddressInfo} from 'node:net';
 import type {AgentEvent, ApprovalRequest} from './agent.js';
 
-type Reply = {text?: string; call?: {name: string; args: unknown}};
+type Reply = {text?: string; call?: {name: string; args: unknown}; chunks?: unknown[]};
 
 let replies: Reply[] = [];
-let requests: Array<{messages: Array<{role: string; content: string | null}>; reasoning?: unknown; provider?: unknown}> = [];
+let requests: Array<{messages: Array<{role: string; content: string | null}>; reasoning?: unknown; provider?: unknown; tools?: Array<{type: string; parameters?: unknown}>}> = [];
 let server: http.Server;
 let Agent: typeof import('./agent.js').Agent;
 let tools: typeof import('../tools/index.js').tools;
@@ -23,6 +23,11 @@ before(async () => {
 		req.on('end', () => {
 			requests.push(JSON.parse(body));
 			const reply = replies.shift() ?? {text: 'done'};
+			if (reply.chunks) {
+				res.writeHead(200, {'Content-Type': 'text/event-stream'});
+				for (const chunk of reply.chunks) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+				return res.end('data: [DONE]\n\n');
+			}
 			const delta = reply.call
 				? {tool_calls: [{index: 0, id: `call_${requests.length}`, function: {name: reply.call.name, arguments: JSON.stringify(reply.call.args)}}]}
 				: {content: reply.text};
@@ -155,4 +160,63 @@ test('sends the thinking level and pinned provider, and omits them by default', 
 	await agent.send('again');
 	assert.deepEqual(requests[1]!.reasoning, {effort: 'high'});
 	assert.deepEqual(requests[1]!.provider, {order: ['deepinfra/fp8'], allow_fallbacks: false});
+});
+
+test('offers OpenRouter web tools only while web is on', async () => {
+	const {agent} = setup();
+	replies = [{text: 'ok'}, {text: 'ok'}];
+	await agent.send('hi');
+	const web = requests[0]!.tools!.filter(t => t.type.startsWith('openrouter:'));
+	assert.deepEqual(web.map(t => t.type), ['openrouter:web_search', 'openrouter:web_fetch']);
+	assert.deepEqual(web[0]!.parameters, {engine: 'exa', max_results: 5});
+	assert.match(requests[0]!.messages[0]!.content ?? '', /search the web/);
+	agent.web = false;
+	await agent.send('again');
+	assert.ok(requests[1]!.tools!.every(t => t.type === 'function'));
+	assert.doesNotMatch(requests[1]!.messages[0]!.content ?? '', /search the web/);
+});
+
+test('reports server tool calls and citations without running them', async () => {
+	const {agent, events, approvals, toolEnds} = setup('deny');
+	const delta = (d: unknown, finish: string | null = null) => ({choices: [{delta: d, finish_reason: finish}]});
+	replies = [
+		{
+			chunks: [
+				// Echoed server tool calls, typed and untyped, followed by the answer reusing index 0.
+				delta({tool_calls: [{index: 0, id: 'srv_1', type: 'openrouter:web_search', function: {name: 'web_search', arguments: '{"query":"ink 8 release"}'}}]}),
+				delta({tool_calls: [{index: 1, id: 'srv_2', function: {name: 'web_fetch', arguments: '{"url":"https://example.com/a"}'}}]}),
+				delta({content: 'Ink 8 shipped.', annotations: [{type: 'url_citation', url_citation: {url: 'https://example.com/a', title: 'Ink 8'}}]}),
+				delta({annotations: [{type: 'url_citation', url_citation: {url: 'https://example.com/a', title: 'Ink 8'}}]}, 'stop'),
+			],
+		},
+	];
+	await agent.send('what is new in ink?');
+	assert.equal(requests.length, 1, 'no follow-up request: nothing was left for tack to run');
+	assert.equal(approvals.length, 0);
+	assert.equal(toolEnds().length, 0);
+	assert.deepEqual(
+		events.filter(e => e.type === 'web'),
+		[
+			{type: 'web', name: 'web_search', summary: 'ink 8 release'},
+			{type: 'web', name: 'web_fetch', summary: 'https://example.com/a'},
+		],
+	);
+	assert.deepEqual(events.find(e => e.type === 'sources'), {type: 'sources', sources: [{url: 'https://example.com/a', title: 'Ink 8'}]});
+});
+
+test('a client tool call after an echoed server call at the same index still runs', async () => {
+	const {agent, cwd, toolEnds} = setup('once');
+	const delta = (d: unknown, finish: string | null = null) => ({choices: [{delta: d, finish_reason: finish}]});
+	replies = [
+		{
+			chunks: [
+				delta({tool_calls: [{index: 0, id: 'srv_1', type: 'openrouter:web_search', function: {name: 'web_search', arguments: '{"query":"x"}'}}]}),
+				delta({tool_calls: [{index: 0, id: 'call_9', type: 'function', function: {name: 'write_file', arguments: '{"path":"a.txt","content":"hi"}'}}]}, 'tool_calls'),
+			],
+		},
+		{text: 'done'},
+	];
+	await agent.send('go');
+	assert.equal(toolEnds().length, 1);
+	assert.equal(fs.readFileSync(path.join(cwd, 'a.txt'), 'utf8'), 'hi');
 });

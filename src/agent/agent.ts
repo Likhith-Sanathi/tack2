@@ -2,7 +2,8 @@ import {z} from 'zod';
 import type {AnyTool, ToolPreview} from '../tools/index.js';
 import {reasoningParam} from './thinking.js';
 import {Permissions, type AlwaysOption, type PermissionMode, type ToolKind} from './permissions.js';
-import {ApiError, streamChat, type ChatMessage, type StreamResult, type ToolCall, type ToolSpec, type Usage} from './openrouter.js';
+import {ApiError, streamChat, type ChatMessage, type Citation, type ServerToolCall, type StreamResult, type ToolCall, type ToolSpec, type Usage} from './openrouter.js';
+import {WEB_NOTE, WEB_TOOLS} from './web.js';
 
 /** `blocked`: refused by the permission mode (the turn continues); `denied`: the user said no (it stops). */
 export type ToolStatus = 'ok' | 'error' | 'denied' | 'blocked' | 'interrupted';
@@ -15,6 +16,10 @@ export type AgentEvent =
 	| {type: 'tool_output'; id: string; chunk: string}
 	| {type: 'tool_end'; id: string; status: ToolStatus; result: string}
 	| {type: 'usage'; usage: Usage}
+	/** A web search or fetch OpenRouter ran for the model. */
+	| {type: 'web'; name: string; summary: string}
+	/** Web pages the reply cited. */
+	| {type: 'sources'; sources: Citation[]}
 	| {type: 'mode'; mode: PermissionMode}
 	/** Older messages were replaced by a summary; token counts are estimates. */
 	| {type: 'compacted'; before: number; after: number}
@@ -126,6 +131,8 @@ export class Agent {
 	thinking: string | undefined;
 	/** Provider slug to route to; undefined lets OpenRouter choose. */
 	provider: string | undefined;
+	/** Offer OpenRouter's web search and fetch tools to the model. */
+	web = true;
 	private messages: ChatMessage[];
 	private summary = '';
 	/** Prompt tokens reported for the last request, and how many messages it contained. */
@@ -216,11 +223,14 @@ export class Agent {
 	}
 
 	private async loop(signal: AbortSignal): Promise<void> {
-		const tools: ToolSpec[] = this.options.tools.map(tool => {
-			// Some providers reject the $schema key, so drop it.
-			const {$schema: _, ...parameters} = z.toJSONSchema(tool.schema);
-			return {type: 'function', function: {name: tool.name, description: tool.description, parameters}};
-		});
+		const tools: ToolSpec[] = [
+			...this.options.tools.map((tool): ToolSpec => {
+				// Some providers reject the $schema key, so drop it.
+				const {$schema: _, ...parameters} = z.toJSONSchema(tool.schema);
+				return {type: 'function', function: {name: tool.name, description: tool.description, parameters}};
+			}),
+			...(this.web ? WEB_TOOLS : []),
+		];
 
 		while (true) {
 			const window = this.contextLength;
@@ -237,12 +247,18 @@ export class Agent {
 				await this.compact(signal, true);
 				result = await this.callModel(tools, signal);
 			}
+			this.separateServerCalls(result);
 			this.messages.push({
 				role: 'assistant',
 				content: result.content || null,
 				...(result.toolCalls.length > 0 ? {tool_calls: result.toolCalls} : {}),
 			});
+			// Before assistant_done, so the UI can place searches above the reply they informed.
+			for (const call of result.serverToolCalls) {
+				this.emit({type: 'web', name: call.name, summary: describeServerCall(call)});
+			}
 			this.emit({type: 'assistant_done'});
+			if (result.citations.length > 0) this.emit({type: 'sources', sources: result.citations});
 			if (result.finishReason === 'length') {
 				this.emit({type: 'notice', message: 'Response was cut off by the model\'s output limit.'});
 			}
@@ -308,9 +324,24 @@ export class Agent {
 
 	/** The conversation as sent to the model, with a reminder of the mode when it restricts tools. */
 	private requestMessages(): ChatMessage[] {
-		if (this.permissions.mode !== 'plan') return this.messages;
+		const notes = [this.web ? WEB_NOTE : '', this.permissions.mode === 'plan' ? PLAN_MODE_NOTE : ''].filter(Boolean);
+		if (notes.length === 0) return this.messages;
 		const [system, ...rest] = this.messages;
-		return [{role: 'system', content: `${system!.content}\n\n${PLAN_MODE_NOTE}`}, ...rest];
+		return [{role: 'system', content: [system!.content, ...notes].join('\n\n')}, ...rest];
+	}
+
+	/**
+	 * Moves calls to OpenRouter's server tools out of the calls tack runs. They're normally typed
+	 * `openrouter:*`, but a plain `web_search` that isn't one of tack's tools is treated the same way.
+	 */
+	private separateServerCalls(result: StreamResult): void {
+		if (!this.web) return;
+		const ours = new Set(this.options.tools.map(t => t.name));
+		const server = new Set(WEB_TOOLS.map(t => t.type.replace(/^openrouter:/, '')));
+		const echoed = result.toolCalls.filter(c => !ours.has(c.function.name) && server.has(c.function.name));
+		if (echoed.length === 0) return;
+		result.toolCalls = result.toolCalls.filter(c => !echoed.includes(c));
+		result.serverToolCalls.push(...echoed.map(c => ({name: c.function.name, arguments: c.function.arguments})));
 	}
 
 	/** Tokens the next request will use: the last reported count plus an estimate for newer messages. */
@@ -443,6 +474,18 @@ export class Agent {
 			return finish('error', `Error: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
+}
+
+/** The query or URL of a server tool call, for display. */
+function describeServerCall(call: ServerToolCall): string {
+	try {
+		const args = JSON.parse(call.arguments || '{}') as {query?: unknown; url?: unknown};
+		const value = args.query ?? args.url;
+		if (typeof value === 'string') return value;
+	} catch {
+		// fall through to the raw arguments
+	}
+	return call.arguments;
 }
 
 function abortPromise(signal: AbortSignal): Promise<'interrupted'> {

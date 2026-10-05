@@ -14,7 +14,12 @@ export type ModelSettings = {
 	providerContext?: number;
 };
 
-export type Config = {model?: string; models?: Record<string, ModelSettings>};
+export type Config = {
+	model?: string;
+	models?: Record<string, ModelSettings>;
+	/** Web search and fetch through OpenRouter; on unless turned off. */
+	web?: boolean;
+};
 
 const dir = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'tack');
 export const configPath = path.join(dir, 'config.json');

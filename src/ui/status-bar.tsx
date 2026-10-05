@@ -27,6 +27,7 @@ export function StatusBar(props: {
 	model?: string;
 	activity: Activity;
 	mode: PermissionMode;
+	web: boolean;
 	usage: UsageTotals;
 	contextLength?: number;
 }) {
@@ -46,6 +47,7 @@ export function StatusBar(props: {
 				)}
 				<Text dimColor>·</Text>
 				<ModeIndicator mode={props.mode} />
+				{props.web && <Text dimColor>· web</Text>}
 			</Box>
 			<Text dimColor>
 				{props.model ?? 'no model'} · ↑{formatTokens(usage.promptTokens)} ↓{formatTokens(usage.completionTokens)} · $

@@ -12,7 +12,7 @@ import {useAgent} from './use-agent.js';
 import {matchCommands, resolveCommand} from './commands.js';
 
 const HELP = [
-	'Commands: /model (switch model), /compact (summarize to free context), /clear (new conversation), /help, /exit (or /quit, /q)',
+	'Commands: /model (switch model), /web (web search on/off), /compact (summarize to free context), /clear (new conversation), /help, /exit (or /quit, /q)',
 	'Keys: Enter sends · Shift+Enter, Option+Enter, Ctrl+J or \\ then Enter adds a new line · ↑/↓ history',
 	'      Shift+Tab cycles permission modes: ask → auto-accept edits → plan (read-only) → auto (no approvals)',
 	'      Esc interrupts the agent · Ctrl+C interrupts, clears the input, or quits when idle',
@@ -34,6 +34,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const [picking, setPicking] = useState(!initialModel);
 	const [models, setModels] = useState<ModelInfo[] | null>(null);
 	const [modelsError, setModelsError] = useState<string | null>(null);
+	const [web, setWeb] = useState(() => loadConfig().web ?? true);
 	/** Thinking and provider choices remembered per model. */
 	const [savedSettings, setSavedSettings] = useState<Record<string, ModelSettings>>(() => loadConfig().models ?? {});
 	const [history, setHistory] = useState(loadHistory);
@@ -62,6 +63,11 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	useEffect(() => {
 		if (model) setAgentModel(model, contextLength, settings.thinking, settings.provider);
 	}, [model, contextLength, settings.thinking, settings.provider, setAgentModel]);
+
+	const {setWeb: setAgentWeb} = agent;
+	useEffect(() => {
+		setAgentWeb(web);
+	}, [web, setAgentWeb]);
 
 	const chooseModel = useCallback(
 		({model: id, settings: chosen}: ModelChoice) => {
@@ -115,6 +121,21 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 			case '/compact':
 				void agent.compact();
 				break;
+			case '/web': {
+				const enabled = !web;
+				setWeb(enabled);
+				try {
+					saveConfig({...loadConfig(), web: enabled});
+				} catch (error) {
+					agent.addNotice(`Could not save config: ${(error as Error).message}`, 'error');
+				}
+				agent.addNotice(
+					enabled
+						? 'Web search on: the model can search (Exa, about $0.007 per search) and read pages through OpenRouter.'
+						: 'Web search off.',
+				);
+				break;
+			}
 			case '/clear':
 				agent.reset();
 				process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
@@ -214,6 +235,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 				model={model && modelLabel(model, settings)}
 				activity={activity}
 				mode={agent.mode}
+				web={web}
 				usage={agent.usage}
 				contextLength={contextLength}
 			/>

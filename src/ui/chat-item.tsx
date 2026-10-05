@@ -158,6 +158,19 @@ export function ChatItemView({
 					<StatusMessage variant="warning">{item.text}</StatusMessage>
 				</Box>
 			);
+		case 'sources':
+			return (
+				<Box marginTop={1} marginLeft={2} flexDirection="column">
+					<Text dimColor>Sources</Text>
+					{item.sources.map((source, i) => (
+						<Text key={source.url} dimColor wrap="truncate-end">
+							{`${i + 1}. `}
+							{source.title ? `${source.title} — ` : ''}
+							<Text color="blue">{source.url}</Text>
+						</Text>
+					))}
+				</Box>
+			);
 		case 'info':
 			return (
 				<Box marginTop={1}>

@@ -1,6 +1,7 @@
 // Minimal OpenRouter client: streaming chat completions with tool calling, plus model listing.
 
 import type {ReasoningInfo} from './thinking.js';
+import {isServerToolCall} from './web.js';
 
 const BASE_URL = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
 
@@ -16,15 +17,23 @@ export type ChatMessage =
 	| {role: 'assistant'; content: string | null; tool_calls?: ToolCall[]}
 	| {role: 'tool'; tool_call_id: string; content: string};
 
-export type ToolSpec = {
-	type: 'function';
-	function: {name: string; description: string; parameters: unknown};
-};
+export type ToolSpec =
+	| {type: 'function'; function: {name: string; description: string; parameters: unknown}}
+	/** A tool OpenRouter runs itself, such as `openrouter:web_search` (see web.ts). */
+	| {type: `openrouter:${string}`; parameters?: Record<string, unknown>};
+
+/** A web source the model cited (OpenRouter's `url_citation` annotation). */
+export type Citation = {url: string; title?: string};
+
+/** A tool call OpenRouter ran itself during the request, e.g. a web search. */
+export type ServerToolCall = {name: string; arguments: string};
 
 export type Usage = {
 	prompt_tokens: number;
 	completion_tokens: number;
 	cost?: number;
+	/** Server tools used, e.g. `{web_search_requests: 2}`. */
+	server_tool_use?: Record<string, number>;
 };
 
 export type StreamResult = {
@@ -32,6 +41,9 @@ export type StreamResult = {
 	toolCalls: ToolCall[];
 	finishReason: string | null;
 	usage?: Usage;
+	/** Server tool calls OpenRouter ran during this response; tack must not run them. */
+	serverToolCalls: ServerToolCall[];
+	citations: Citation[];
 };
 
 export type ModelInfo = {
@@ -126,6 +138,8 @@ async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<unkn
 	}
 }
 
+type Annotation = {type?: string; url_citation?: {url?: string; title?: string}};
+
 type StreamChunk = {
 	error?: {message?: string; code?: number};
 	choices?: Array<{
@@ -136,9 +150,12 @@ type StreamChunk = {
 			tool_calls?: Array<{
 				index: number;
 				id?: string;
+				type?: string;
 				function?: {name?: string; arguments?: string};
 			}>;
+			annotations?: Annotation[];
 		};
+		message?: {annotations?: Annotation[]};
 		finish_reason?: string | null;
 	}>;
 	usage?: Usage;
@@ -175,7 +192,17 @@ export async function streamChat(options: {
 	});
 	if (!res.ok || !res.body) throw await errorFromResponse(res);
 
-	const result: StreamResult = {content: '', toolCalls: [], finishReason: null};
+	const result: StreamResult = {content: '', toolCalls: [], finishReason: null, serverToolCalls: [], citations: []};
+	// Calls being streamed, by index. A new id at a used index starts a new call: if OpenRouter
+	// echoes server tool calls, the model's next round may reuse their indexes.
+	const open = new Map<number, ToolCall & {kind?: string}>();
+	const finished: Array<ToolCall & {kind?: string}> = [];
+	const cite = (annotations: Annotation[] | undefined) => {
+		for (const a of annotations ?? []) {
+			const url = a.type === 'url_citation' ? a.url_citation?.url : undefined;
+			if (url && !result.citations.some(c => c.url === url)) result.citations.push({url, title: a.url_citation?.title});
+		}
+	};
 	for await (const event of sseEvents(res.body)) {
 		const chunk = event as StreamChunk;
 		if (chunk.error) {
@@ -197,19 +224,33 @@ export async function streamChat(options: {
 			result.content += delta.content;
 			options.onText(delta.content);
 		}
+		cite(delta?.annotations);
+		cite(choice.message?.annotations);
 		for (const part of delta?.tool_calls ?? []) {
 			// Tool calls arrive in fragments keyed by index; stitch them together.
-			const call = (result.toolCalls[part.index] ??= {
-				id: '',
-				type: 'function',
-				function: {name: '', arguments: ''},
-			});
+			let call = open.get(part.index);
+			if (call && part.id && call.id && part.id !== call.id) {
+				finished.push(call);
+				call = undefined;
+			}
+			if (!call) {
+				call = {id: '', type: 'function', function: {name: '', arguments: ''}};
+				open.set(part.index, call);
+			}
 			if (part.id) call.id = part.id;
+			if (part.type) call.kind = part.type;
 			if (part.function?.name) call.function.name += part.function.name;
 			if (part.function?.arguments) call.function.arguments += part.function.arguments;
 		}
 	}
-	result.toolCalls = result.toolCalls.filter(Boolean);
+	const calls = [...finished, ...[...open.entries()].sort(([a], [b]) => a - b).map(([, call]) => call)];
+	for (const {kind, ...call} of calls) {
+		if (isServerToolCall(kind, call.function.name)) {
+			result.serverToolCalls.push({name: call.function.name.replace(/^openrouter:/, ''), arguments: call.function.arguments});
+		} else {
+			result.toolCalls.push(call);
+		}
+	}
 	return result;
 }
 
