@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Box, Static, Text, useApp, useInput, useWindowSize} from 'ink';
+import {Box, Static, useApp, useInput, useWindowSize} from 'ink';
 import {listModels, type ModelInfo, type Usage} from '../agent/openrouter.js';
 import {loadConfig, loadHistory, saveConfig, saveHistory} from '../config.js';
 import {ChatItemView} from './chat-item.js';
@@ -7,7 +7,7 @@ import {ApprovalPrompt} from './approval-prompt.js';
 import {ModelPicker} from './model-picker.js';
 import {StatusBar, type Activity} from './status-bar.js';
 import {PromptInput, type PromptInputHandle} from './prompt-input.js';
-import {useAgent, type ChatItem} from './use-agent.js';
+import {useAgent} from './use-agent.js';
 import {matchCommands} from './commands.js';
 
 const HELP = [
@@ -16,8 +16,6 @@ const HELP = [
 	'      Shift+Tab cycles permission modes: ask → auto-accept edits → plan (read-only) → auto (no approvals)',
 	'      Esc interrupts the agent · Ctrl+C interrupts, clears the input, or quits when idle',
 ].join('\n');
-
-type StaticEntry = {id: number; kind: 'header'} | ChatItem;
 
 export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; initialModel?: string}) {
 	const {exit} = useApp();
@@ -128,7 +126,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 			(item.kind === 'tool' && item.status === 'running'),
 	);
 	const splitAt = firstLive === -1 ? agent.items.length : firstLive;
-	const staticEntries: StaticEntry[] = [{id: -1, kind: 'header'}, ...agent.items.slice(0, splitAt)];
+	const staticEntries = agent.items.slice(0, splitAt);
 	const liveItems = agent.items.slice(splitAt);
 
 	const activity: Activity = agent.approval
@@ -142,22 +140,12 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	return (
 		<Box flexDirection="column">
 			<Static key={staticKey} items={staticEntries}>
-				{entry =>
-					entry.kind === 'header' ? (
-						<Box key="header" flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
-							<Text bold color="magenta">
-								tack
-							</Text>
-							<Text dimColor>{cwd}</Text>
-							<Text dimColor>/help for commands · Shift+Tab to change permission mode · Esc to interrupt</Text>
-						</Box>
-					) : (
-						// Static output is laid out without a parent width, so give it one explicitly for wrapping.
-						<Box key={entry.id} width={columns}>
-							<ChatItemView item={entry} />
-						</Box>
-					)
-				}
+				{entry => (
+					// Static output is laid out without a parent width, so give it one explicitly for wrapping.
+					<Box key={entry.id} width={columns}>
+						<ChatItemView item={entry} />
+					</Box>
+				)}
 			</Static>
 			{liveItems.map(item => (
 				<ChatItemView
