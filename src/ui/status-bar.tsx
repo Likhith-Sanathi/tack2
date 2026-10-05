@@ -37,6 +37,7 @@ export function StatusBar(props: {
 	activity: Activity;
 	mode: PermissionMode;
 	web: boolean;
+	sandbox: boolean;
 	usage: UsageTotals;
 	contextLength?: number;
 	width: number;
@@ -59,6 +60,7 @@ export function StatusBar(props: {
 		'·',
 		`${mode.label} (shift+tab)`,
 		props.web ? '· web' : '',
+		props.sandbox ? '· sandbox' : '',
 	]
 		.filter(Boolean)
 		.join(' ');
@@ -81,6 +83,7 @@ export function StatusBar(props: {
 					{hints && <Text dimColor bold={false}> (shift+tab)</Text>}
 				</Text>
 				{props.web && <Text dimColor>· web</Text>}
+				{props.sandbox && <Text dimColor>· sandbox</Text>}
 			</Box>
 			{/* Right-aligned; only the model name shrinks (with "…"). */}
 			<Box flexGrow={1} flexShrink={1} justifyContent="flex-end" marginLeft={2} minWidth={0}>

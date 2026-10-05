@@ -57,8 +57,13 @@ export class Permissions {
 	/** Tool name -> scopes approved for the session. */
 	private readonly allowedScopes = new Map<string, Set<string>>();
 
-	check(tool: PermissionSubject, args: unknown): PermissionCheck {
+	/**
+	 * `sandboxed`: the call will run in the OS sandbox, whose limits (read-only in plan mode) make
+	 * approval unnecessary in every mode.
+	 */
+	check(tool: PermissionSubject, args: unknown, options: {sandboxed?: boolean} = {}): PermissionCheck {
 		if (tool.kind === 'read' || tool.isReadOnly?.(args as never)) return {behavior: 'allow'};
+		if (options.sandboxed) return {behavior: 'allow'};
 		if (this.mode === 'auto') return {behavior: 'allow'};
 		if (this.mode === 'plan') return {behavior: 'deny', reason: PLAN_MODE_DENIAL};
 		if (tool.kind === 'edit' && this.mode === 'auto-edit') return {behavior: 'allow'};

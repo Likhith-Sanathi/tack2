@@ -4,7 +4,8 @@
 
 import {z} from 'zod';
 import {defineTool} from './types.js';
-import {killProcessTree, spawnShell, type ShellProcess} from './bash.js';
+import {killProcessTree, sandboxFields, spawnShell, unsandboxedPreview, type ShellProcess} from './bash.js';
+import {sandboxHint, type SandboxPolicy} from './sandbox.js';
 import {commandScope} from '../agent/permissions.js';
 
 /** Output kept per process; older output is dropped first. */
@@ -39,8 +40,8 @@ function nextChange(proc: Pick<BackgroundProcess, 'changed' | 'notify'>) {
 	proc.changed = new Promise(resolve => (proc.notify = resolve));
 }
 
-function start(command: string, cwd: string): BackgroundProcess {
-	const child = spawnShell(command, cwd);
+function start(command: string, cwd: string, sandbox: SandboxPolicy | null): BackgroundProcess {
+	const child = spawnShell(command, cwd, sandbox);
 	const proc = {id: `bg${nextId++}`, command, child, buffer: '', total: 0, dropped: 0, readUpTo: 0} as BackgroundProcess;
 	nextChange(proc);
 	const onData = (data: Buffer) => {
@@ -130,12 +131,14 @@ export const bashBackground = defineTool({
 		'Start a long-running shell command (dev server, watcher, slow build or test run) in the background and return ' +
 		'right away with an id and its first output. Read more output with bash_output and stop it with kill_process. ' +
 		'Stdin is closed. Background processes are stopped when tack exits.',
-	schema: z.object({command: z.string().describe('The shell command to run')}),
+	schema: z.object({command: z.string().describe('The shell command to run'), ...sandboxFields}),
 	kind: 'execute',
+	sandboxable: args => args.sandbox !== false,
+	preview: args => unsandboxedPreview(args),
 	approvalScope: args => commandScope(args.command),
 	describe: args => args.command,
-	async run({command}, {cwd, signal}) {
-		const proc = start(command, cwd);
+	async run({command}, {cwd, signal, sandbox}) {
+		const proc = start(command, cwd, sandbox ?? null);
 		// Catch startup output, or an immediate failure, before reporting back.
 		await waitForExit(proc, STARTUP_WAIT_MS, signal);
 		if (signal.aborted) {
@@ -148,6 +151,7 @@ export const bashBackground = defineTool({
 			`Started ${proc.id}${pid}: ${status(proc)}.`,
 			output || '(no output yet)',
 			proc.exit === undefined ? `Use bash_output with id "${proc.id}" to read more and kill_process to stop it.` : '',
+			sandbox && proc.exit !== undefined && proc.exit !== 0 ? sandboxHint(output, sandbox).trim() : '',
 		]
 			.filter(Boolean)
 			.join('\n');

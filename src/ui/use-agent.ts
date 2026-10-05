@@ -219,6 +219,23 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 	const cycleMode = useCallback(() => agent.setMode(nextMode(agent.mode)), [agent]);
 
 	const setWeb = useCallback((enabled: boolean) => (agent.web = enabled), [agent]);
+	const setSandbox = useCallback((enabled: boolean) => (agent.sandbox = enabled), [agent]);
 
-	return {items, running, approval, usage, mode, cycleMode, send, compact, interrupt, reset, setModel, setWeb, addNotice};
+	return {
+		items,
+		running,
+		approval,
+		usage,
+		mode,
+		cycleMode,
+		send,
+		compact,
+		interrupt,
+		reset,
+		setModel,
+		setWeb,
+		setSandbox,
+		sandboxUnavailable: agent.sandboxUnavailable,
+		addNotice,
+	};
 }

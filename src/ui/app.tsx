@@ -12,7 +12,7 @@ import {useAgent} from './use-agent.js';
 import {matchCommands, resolveCommand} from './commands.js';
 
 const HELP = [
-	'Commands: /model (switch model), /web (web search on/off), /compact (summarize to free context), /clear (new conversation), /help, /exit (or /quit, /q)',
+	'Commands: /model (switch model), /sandbox (command sandbox on/off), /web (web search on/off), /compact (summarize to free context), /clear (new conversation), /help, /exit (or /quit, /q)',
 	'Keys: Enter sends · Shift+Enter, Option+Enter, Ctrl+J or \\ then Enter adds a new line · ↑/↓ history',
 	'      Shift+Tab cycles permission modes: ask → auto-accept edits → plan (read-only) → auto (no approvals)',
 	'      Esc interrupts the agent · Ctrl+C interrupts, clears the input, or quits when idle',
@@ -35,6 +35,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const [models, setModels] = useState<ModelInfo[] | null>(null);
 	const [modelsError, setModelsError] = useState<string | null>(null);
 	const [web, setWeb] = useState(() => loadConfig().web ?? true);
+	const [sandbox, setSandbox] = useState(() => loadConfig().sandbox ?? true);
 	/** Thinking and provider choices remembered per model. */
 	const [savedSettings, setSavedSettings] = useState<Record<string, ModelSettings>>(() => loadConfig().models ?? {});
 	const [history, setHistory] = useState(loadHistory);
@@ -64,10 +65,15 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 		if (model) setAgentModel(model, contextLength, settings.thinking, settings.provider);
 	}, [model, contextLength, settings.thinking, settings.provider, setAgentModel]);
 
-	const {setWeb: setAgentWeb} = agent;
+	const {setWeb: setAgentWeb, setSandbox: setAgentSandbox} = agent;
 	useEffect(() => {
 		setAgentWeb(web);
 	}, [web, setAgentWeb]);
+	useEffect(() => {
+		setAgentSandbox(sandbox);
+	}, [sandbox, setAgentSandbox]);
+	// Auto mode never asks, so it runs commands unsandboxed.
+	const sandboxActive = sandbox && !agent.sandboxUnavailable && agent.mode !== 'auto';
 
 	const chooseModel = useCallback(
 		({model: id, settings: chosen}: ModelChoice) => {
@@ -121,6 +127,25 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 			case '/compact':
 				void agent.compact();
 				break;
+			case '/sandbox': {
+				if (agent.sandboxUnavailable) {
+					agent.addNotice(`Sandbox unavailable: ${agent.sandboxUnavailable}`, 'error');
+					break;
+				}
+				const enabled = !sandbox;
+				setSandbox(enabled);
+				try {
+					saveConfig({...loadConfig(), sandbox: enabled});
+				} catch (error) {
+					agent.addNotice(`Could not save config: ${(error as Error).message}`, 'error');
+				}
+				agent.addNotice(
+					enabled
+						? 'Sandbox on: commands run without approval but can only write to the project and temp folders, with no network except localhost. Commands that need more ask first. (Auto mode skips the sandbox.)'
+						: 'Sandbox off: commands need approval again (except read-only ones and in auto mode).',
+				);
+				break;
+			}
 			case '/web': {
 				const enabled = !web;
 				setWeb(enabled);
@@ -236,6 +261,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 				activity={activity}
 				mode={agent.mode}
 				web={web}
+				sandbox={sandboxActive}
 				width={columns}
 				usage={agent.usage}
 				contextLength={contextLength}

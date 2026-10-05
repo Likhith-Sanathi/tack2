@@ -46,7 +46,7 @@ before(async () => {
 
 after(() => server.close());
 
-function setup(answer: 'once' | 'always' | 'deny' = 'once') {
+function setup(answer: 'once' | 'always' | 'deny' = 'once', extra: {tools?: typeof tools; sandboxUnavailable?: string | null} = {}) {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'tack-test-'));
 	const events: AgentEvent[] = [];
 	const approvals: ApprovalRequest[] = [];
@@ -55,7 +55,8 @@ function setup(answer: 'once' | 'always' | 'deny' = 'once') {
 		apiKey: 'test',
 		model: 'test/model',
 		cwd,
-		tools,
+		tools: extra.tools ?? tools,
+		sandboxUnavailable: extra.sandboxUnavailable,
 		onEvent: event => events.push(event),
 		requestApproval: async request => {
 			approvals.push(request);
@@ -219,4 +220,61 @@ test('a client tool call after an echoed server call at the same index still run
 	await agent.send('go');
 	assert.equal(toolEnds().length, 1);
 	assert.equal(fs.readFileSync(path.join(cwd, 'a.txt'), 'utf8'), 'hi');
+});
+
+test('sandbox: commands run without approval, read-only in plan mode, unsandboxed in auto mode', async () => {
+	const {defineTool} = await import('../tools/index.js');
+	const {z} = await import('zod');
+	// A stand-in for bash that reports the sandbox it was given instead of running anything.
+	const seen: unknown[] = [];
+	const shell = defineTool({
+		name: 'shell',
+		description: 'test',
+		schema: z.object({command: z.string(), sandbox: z.boolean().optional()}),
+		kind: 'execute',
+		sandboxable: args => args.sandbox !== false,
+		describe: args => args.command,
+		run: async (_args, ctx) => {
+			seen.push(ctx.sandbox ?? null);
+			return 'ok';
+		},
+	});
+	const {agent, approvals} = setup('once', {tools: [shell], sandboxUnavailable: null});
+	const run = async (args: unknown) => {
+		replies = [{call: {name: 'shell', args}}, {text: 'ok'}];
+		await agent.send('go');
+	};
+
+	await run({command: 'npm test'});
+	assert.deepEqual(seen.at(-1), {writeProject: true, network: false});
+	assert.equal(approvals.length, 0);
+	assert.match(requests.at(-1)!.messages[0]!.content ?? '', /run in a sandbox/);
+
+	await run({command: 'npm install', sandbox: false});
+	assert.equal(seen.at(-1), null);
+	assert.equal(approvals.length, 1, 'leaving the sandbox needs approval');
+
+	agent.setMode('plan');
+	await run({command: 'npm test'});
+	assert.deepEqual(seen.at(-1), {writeProject: false, network: false});
+	assert.equal(approvals.length, 1);
+	assert.match(requests.at(-1)!.messages[0]!.content ?? '', /read-only sandbox/);
+
+	agent.setMode('auto');
+	await run({command: 'npm test'});
+	assert.equal(seen.at(-1), null, 'auto mode skips the sandbox');
+
+	agent.setMode('ask');
+	agent.sandbox = false;
+	await run({command: 'npm test'});
+	assert.equal(seen.at(-1), null);
+	assert.equal(approvals.length, 2, 'with the sandbox off, commands ask again');
+});
+
+test('sandbox: unavailable on this platform means approvals as before', async () => {
+	const {agent, approvals} = setup('once', {sandboxUnavailable: "Sandboxing isn't supported"});
+	replies = [{call: {name: 'bash', args: {command: 'touch x'}}}, {text: 'ok'}];
+	await agent.send('go');
+	assert.equal(approvals.length, 1);
+	assert.doesNotMatch(requests.at(-1)!.messages[0]!.content ?? '', /sandbox/);
 });

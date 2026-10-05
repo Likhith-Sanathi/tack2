@@ -19,6 +19,8 @@ export type Config = {
 	models?: Record<string, ModelSettings>;
 	/** Web search and fetch through OpenRouter; on unless turned off. */
 	web?: boolean;
+	/** Run shell commands in the OS sandbox where supported; on unless turned off. */
+	sandbox?: boolean;
 };
 
 const dir = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'tack');

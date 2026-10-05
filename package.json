@@ -18,7 +18,8 @@
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "sandbox-check": "node dist/sandbox-check.js"
   },
   "dependencies": {
     "@inkjs/ui": "^2.0.0",

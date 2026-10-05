@@ -144,3 +144,15 @@ test('isReadOnlyCommand', () => {
 	for (const c of yes) assert.equal(isReadOnlyCommand(c), true, c);
 	for (const c of no) assert.equal(isReadOnlyCommand(c), false, c);
 });
+
+test('sandboxed calls run without approval, even in plan mode', () => {
+	const p = new Permissions();
+	for (const mode of ['ask', 'auto-edit', 'plan'] as const) {
+		p.mode = mode;
+		assert.deepEqual(p.check(bash, cmd('npm test'), {sandboxed: true}), {behavior: 'allow'}, mode);
+	}
+	p.mode = 'ask';
+	assert.equal(p.check(bash, cmd('npm install'), {sandboxed: false}).behavior, 'ask');
+	p.mode = 'plan';
+	assert.equal(p.check(bash, cmd('npm install'), {sandboxed: false}).behavior, 'deny');
+});

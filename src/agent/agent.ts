@@ -4,6 +4,7 @@ import {reasoningParam} from './thinking.js';
 import {Permissions, type AlwaysOption, type PermissionMode, type ToolKind} from './permissions.js';
 import {ApiError, streamChat, type ChatMessage, type Citation, type ServerToolCall, type StreamResult, type ToolCall, type ToolSpec, type Usage} from './openrouter.js';
 import {WEB_NOTE, WEB_TOOLS} from './web.js';
+import {sandboxUnavailableReason, type SandboxPolicy} from '../tools/sandbox.js';
 
 /** `blocked`: refused by the permission mode (the turn continues); `denied`: the user said no (it stops). */
 export type ToolStatus = 'ok' | 'error' | 'denied' | 'blocked' | 'interrupted';
@@ -42,6 +43,8 @@ export type AgentOptions = {
 	cwd: string;
 	tools: AnyTool[];
 	onEvent: (event: AgentEvent) => void;
+	/** Overrides sandbox detection (for tests): null means available, a string why it isn't. */
+	sandboxUnavailable?: string | null;
 	/** Asks the user whether a tool may run. Must resolve; an interrupt is handled by the agent. */
 	requestApproval: (request: ApprovalRequest) => Promise<ApprovalDecision>;
 };
@@ -53,6 +56,17 @@ const COMPACT_THRESHOLD = 0.75;
 const CHARS_PER_TOKEN = 4;
 /** Context size assumed when the model's is unknown (only used to cap the summary request). */
 const FALLBACK_CONTEXT = 32_000;
+
+const SANDBOX_NOTE =
+	'Shell commands (bash, bash_background) run in a sandbox and need no approval: they can write only inside ' +
+	'the project and temp folders and have no network access except localhost. If a command clearly needs more, ' +
+	'such as installing dependencies or calling an external service, or fails because of the sandbox, run it with ' +
+	'sandbox: false and a short reason; the user is asked to approve that.';
+
+const SANDBOX_PLAN_NOTE =
+	'PLAN MODE IS ON: do not edit files. Shell commands run in a read-only sandbox, so you can build, test and ' +
+	'inspect the project to inform your plan, but nothing can change it and there is no network access except ' +
+	'localhost. Investigate, then present a concrete plan and wait for the user to approve it.';
 
 const PLAN_MODE_NOTE =
 	'PLAN MODE IS ON: you may only read and search. Do not edit files or run commands other than ' +
@@ -133,6 +147,10 @@ export class Agent {
 	provider: string | undefined;
 	/** Offer OpenRouter's web search and fetch tools to the model. */
 	web = true;
+	/** Run shell commands in the OS sandbox where supported (see tools/sandbox.ts). */
+	sandbox = true;
+	/** Why the sandbox can't run on this machine, or null. */
+	readonly sandboxUnavailable: string | null;
 	private messages: ChatMessage[];
 	private summary = '';
 	/** Prompt tokens reported for the last request, and how many messages it contained. */
@@ -142,6 +160,7 @@ export class Agent {
 
 	constructor(private readonly options: AgentOptions) {
 		this.model = options.model;
+		this.sandboxUnavailable = options.sandboxUnavailable !== undefined ? options.sandboxUnavailable : sandboxUnavailableReason();
 		this.messages = [this.systemMessage()];
 	}
 
@@ -162,6 +181,17 @@ export class Agent {
 		if (mode === this.permissions.mode) return;
 		this.permissions.mode = mode;
 		this.emit({type: 'mode', mode});
+	}
+
+	/** Whether shell commands currently run sandboxed (it's off in auto mode, which never asks). */
+	get sandboxActive(): boolean {
+		return this.sandbox && !this.sandboxUnavailable && this.permissions.mode !== 'auto';
+	}
+
+	/** The sandbox for one call, or null to run it unsandboxed. Plan mode makes the project read-only. */
+	private sandboxFor(tool: AnyTool, args: unknown): SandboxPolicy | null {
+		if (!this.sandboxActive || !tool.sandboxable?.(args)) return null;
+		return {writeProject: this.permissions.mode !== 'plan', network: false};
 	}
 
 	get running(): boolean {
@@ -324,7 +354,12 @@ export class Agent {
 
 	/** The conversation as sent to the model, with a reminder of the mode when it restricts tools. */
 	private requestMessages(): ChatMessage[] {
-		const notes = [this.web ? WEB_NOTE : '', this.permissions.mode === 'plan' ? PLAN_MODE_NOTE : ''].filter(Boolean);
+		const plan = this.permissions.mode === 'plan';
+		const notes = [
+			this.web ? WEB_NOTE : '',
+			// In plan mode the sandbox note replaces the plan note, since sandboxed commands are allowed.
+			this.sandboxActive ? (plan ? SANDBOX_PLAN_NOTE : SANDBOX_NOTE) : plan ? PLAN_MODE_NOTE : '',
+		].filter(Boolean);
 		if (notes.length === 0) return this.messages;
 		const [system, ...rest] = this.messages;
 		return [{role: 'system', content: [system!.content, ...notes].join('\n\n')}, ...rest];
@@ -430,12 +465,14 @@ export class Agent {
 		}
 		const args = parsed.data;
 		const summary = tool.describe(args);
+		const sandbox = this.sandboxFor(tool, args);
 		const ctx = {
 			cwd: this.options.cwd,
 			signal,
 			onOutput: (chunk: string) => this.emit({type: 'tool_output', id: call.id, chunk}),
+			sandbox,
 		};
-		const permission = this.permissions.check(tool, args);
+		const permission = this.permissions.check(tool, args, {sandboxed: sandbox !== null});
 		if (permission.behavior === 'deny') {
 			this.emit({type: 'tool_start', id: call.id, name, summary});
 			return finish('blocked', permission.reason);

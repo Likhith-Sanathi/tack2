@@ -35,6 +35,7 @@ Your choices are saved in `~/.config/tack/config.json` (or `$XDG_CONFIG_HOME/tac
 | --- | --- |
 | `/` | Open the command menu: type to filter, `↑`/`↓` to pick, `Tab` (or `→`) to fill in, `Enter` to run, `Esc` to close |
 | `/model` | Switch model, thinking level and provider (saved) |
+| `/sandbox` | Turn the command sandbox on or off (saved; macOS) |
 | `/web` | Turn web search and page fetching on or off (saved) |
 | `/compact` | Summarize the conversation so far to free up context |
 | `/clear` | Start a new conversation |
@@ -61,6 +62,17 @@ You can keep typing while the agent works; Enter sends once it's done. Pasted te
 **auto** never asks. Every command runs as soon as the model requests it, including ones that delete files or reach the network, so use it only in a project you can restore (for example, one committed to git). File tools still refuse paths outside the working directory, but shell commands can reach anything your user account can. It comes last in the cycle, so getting to plan mode never passes through it, and one more `Shift+Tab` returns to ask. The status bar shows it in red.
 
 In plan mode the agent is told it can only read and propose a plan. Refused calls return a message to the model, so it carries on with a plan instead of stopping. Switch modes when you want it to proceed.
+
+**Sandbox (macOS).** Shell commands (`bash`, `bash_background`) run inside macOS's built-in sandbox (`sandbox-exec`), so they **don't need approval** in ask, auto-accept-edits and plan mode. Inside the sandbox a command:
+
+- can write only to the project folder and temp folders. Package-manager caches (npm, pip, Go) are redirected to a temp folder.
+- can't change `.git/hooks`, `.git/config`, `.gitmodules`, `.vscode/` or `.idea/`, because those run code outside the sandbox later, and can't rename, delete or create `.git` itself.
+- can read everything except credential folders (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.netrc`, `~/.docker/config.json`, `~/.kube`).
+- has no network access, except to servers on your machine (`localhost`), so dev servers and local databases work.
+
+In **plan mode** the sandbox is read-only, so the agent can build and run tests to inform its plan but can't change anything. When a command needs more, such as `npm install` (network) or writing outside the project, the agent re-runs it with `sandbox: false` and a reason, and you approve it as before. If a sandboxed command fails in a way that looks like the sandbox blocked it, tack tells the model it can do that. **Auto** mode skips the sandbox, since it never asks anyway. `/sandbox` turns it off (and on); the status bar shows `· sandbox` while it's active. Commands never see `OPENROUTER_API_KEY`.
+
+To check that the sandbox behaves as described on your Mac, run `npm run sandbox-check`: it runs real commands in a scratch project and reports what was allowed and blocked. The rules are adapted from Anthropic's [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime) (Apache-2.0), which Claude Code uses. On Linux and Windows there's no sandbox yet, and commands need approval as described below.
 
 **Approvals.** File changes show a diff with line numbers (new files show all their lines); commands show the command. Choose **Yes** to allow that one call, or **No**, which stops the turn so you can tell the agent what to do instead. The middle option, "don't ask again", depends on the call:
 

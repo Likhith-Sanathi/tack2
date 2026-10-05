@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import type {FileDiff} from './diff.js';
 import type {ToolKind} from '../agent/permissions.js';
+import type {SandboxPolicy} from './sandbox.js';
 
 export type ToolContext = {
 	/** Directory the agent operates in. */
@@ -9,6 +10,8 @@ export type ToolContext = {
 	signal: AbortSignal;
 	/** Streams progress output to the UI while the tool runs (e.g. a command's stdout). */
 	onOutput?: (chunk: string) => void;
+	/** For tools that run commands: the OS sandbox to use, or null/absent to run unsandboxed. */
+	sandbox?: SandboxPolicy | null;
 };
 
 /** What the user sees about a call before approving it, and in the chat after it succeeds. */
@@ -30,6 +33,11 @@ export type Tool<S extends z.ZodType = z.ZodType> = {
 	 * offer "once". Without it, "don't ask again" covers the whole tool (or, for edits, all edits).
 	 */
 	approvalScope?: (args: z.infer<S>) => string | null;
+	/**
+	 * Optional, for tools that run commands: true if this call should run in the OS sandbox (see
+	 * sandbox.ts). Sandboxed calls run without approval; calls that opt out need approval as usual.
+	 */
+	sandboxable?: (args: z.infer<S>) => boolean;
 	/** Optional: true if this call only reads (e.g. `ls`), so it runs without approval in every mode. */
 	isReadOnly?: (args: z.infer<S>) => boolean;
 	/** Short human-readable summary of a call, shown in the chat and approval prompt. */
@@ -38,7 +46,7 @@ export type Tool<S extends z.ZodType = z.ZodType> = {
 	 * Optional details shown in the approval prompt and in the chat (e.g. a diff). Computed before
 	 * the call runs; throwing reports the error to the model without asking the user.
 	 */
-	preview?: (args: z.infer<S>, ctx: ToolContext) => ToolPreview | Promise<ToolPreview>;
+	preview?: (args: z.infer<S>, ctx: ToolContext) => ToolPreview | undefined | Promise<ToolPreview | undefined>;
 	/** Performs the action. Return text for the model; throw to report an error. */
 	run: (args: z.infer<S>, ctx: ToolContext) => Promise<string>;
 };
