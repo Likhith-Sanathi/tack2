@@ -212,7 +212,7 @@ export function ModelPicker(props: Props) {
 			)),
 		];
 		return (
-			<Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1} marginTop={1}>
+			<Box flexDirection="column" backgroundColor="gray" paddingX={1} paddingY={1} marginTop={1}>
 				<Text bold wrap="truncate-end">
 					Provider for {chosen}
 					{level ? <Text dimColor>{`  · thinking: ${thinkingLabel(level)}`}</Text> : null}
@@ -240,7 +240,7 @@ export function ModelPicker(props: Props) {
 		</Text>
 	));
 	return (
-		<Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1} marginTop={1}>
+		<Box flexDirection="column" backgroundColor="gray" paddingX={1} paddingY={1} marginTop={1}>
 			<Text bold>Select a model</Text>
 			<Text dimColor wrap="truncate-end">
 				Type to filter, ↑/↓ to move, ←/→ to set thinking, Enter for providers{props.onCancel ? ', Esc to cancel' : ''}.

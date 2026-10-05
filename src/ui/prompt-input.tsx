@@ -17,7 +17,8 @@ export type PromptInputHandle = {clear: () => void};
 type Props = {
 	ref?: Ref<PromptInputHandle>;
 	placeholder: string;
-	borderColor: string;
+	/** Color of the `›` marker; dimmed while the agent works. */
+	accentColor: string;
 	/** When false, Enter is ignored (the text is kept) — e.g. while the agent is working. */
 	canSubmit: boolean;
 	/** When false, the input is hidden and ignores keys but keeps its text. */
@@ -58,7 +59,7 @@ function nextWord(value: string, cursor: number): number {
 	return i;
 }
 
-export function PromptInput({ref, placeholder, borderColor, canSubmit, isActive, maxLines, history, onSubmit, onChange}: Props) {
+export function PromptInput({ref, placeholder, accentColor, canSubmit, isActive, maxLines, history, onSubmit, onChange}: Props) {
 	// Kept in a ref so several keys arriving before a re-render (fast typing) all see fresh state.
 	const state = useRef({value: '', cursor: 0});
 	// Index into history while browsing it (0 = newest), and the draft it replaced.
@@ -208,11 +209,11 @@ export function PromptInput({ref, placeholder, borderColor, canSubmit, isActive,
 					<Text dimColor>{'  ↑/↓ select · Tab complete · Enter run · Esc close'}</Text>
 				</Box>
 			)}
-			<Box flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1} marginTop={menuOpen ? 0 : 1}>
+			<Box flexDirection="column" backgroundColor="gray" paddingX={1} paddingY={1} marginTop={menuOpen ? 0 : 1}>
 				{first > 0 && <Text dimColor>{`  ↑ ${first} more line${first === 1 ? '' : 's'}`}</Text>}
 				{shown.map((line, i) => {
 					const row = first + i;
-					const prefix = row === 0 ? <Text color="cyan">{'› '}</Text> : <Text>{'  '}</Text>;
+					const prefix = row === 0 ? <Text color={accentColor}>{'› '}</Text> : <Text>{'  '}</Text>;
 					if (!value) {
 						return (
 							<Box key={row}>

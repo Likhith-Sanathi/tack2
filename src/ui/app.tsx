@@ -195,7 +195,7 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 			<Box display={inputActive ? 'flex' : 'none'} flexDirection="column">
 				<PromptInput
 					ref={input}
-					borderColor={agent.running ? 'gray' : 'cyan'}
+					accentColor={agent.running ? 'white' : 'cyan'}
 					isActive={inputActive}
 					canSubmit={!agent.running}
 					maxLines={maxInputLines}
