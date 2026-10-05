@@ -24,12 +24,17 @@ The agent works in the directory you start it from. File tools refuse paths outs
 
 ## Usage
 
-On first launch you pick a model. The list shows OpenRouter models that support tool calling, with prices and context size. Type to filter, then use ↑/↓ and Enter. If nothing matches, Enter uses what you typed as a model id. Your choice is saved in `~/.config/tack/config.json` (or `$XDG_CONFIG_HOME/tack/`) and reused next time.
+On first launch you pick a model, in two steps:
+
+1. **Model.** The list shows OpenRouter models that support tool calling, with prices and context size. Type to filter, `↑`/`↓` to move. `←`/`→` set the **thinking level** for the highlighted model, using the levels OpenRouter lists for it (e.g. off · low · medium · high · extra high · max, or just off/on). Models that don't let you change it say so. Until you change it, the model's own default is used. If nothing matches the filter, `Enter` uses what you typed as a model id.
+2. **Provider.** `Enter` lists the providers serving that model, with price, context size, quantization and recent uptime. **Auto**, the first option, lets OpenRouter choose and fall back to another provider if one fails. Picking a provider pins every request to it with no fallback, so if it's down you'll see the error. `Esc` goes back to the model list.
+
+Your choices are saved in `~/.config/tack/config.json` (or `$XDG_CONFIG_HOME/tack/`): the current model, plus the thinking level and provider for each model you've used, which the picker remembers next time. The status bar shows them, e.g. `deepseek/deepseek-v4 (high, via DeepInfra)`.
 
 | Input | Action |
 | --- | --- |
 | `/` | Open the command menu: type to filter, `↑`/`↓` to pick, `Tab` (or `→`) to fill in, `Enter` to run, `Esc` to close |
-| `/model` | Switch model (persists) |
+| `/model` | Switch model, thinking level and provider (saved) |
 | `/compact` | Summarize the conversation so far to free up context |
 | `/clear` | Start a new conversation |
 | `/help` | Show commands and keys |

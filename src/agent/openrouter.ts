@@ -1,5 +1,7 @@
 // Minimal OpenRouter client: streaming chat completions with tool calling, plus model listing.
 
+import type {ReasoningInfo} from './thinking.js';
+
 const BASE_URL = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
 
 export type ToolCall = {
@@ -39,6 +41,23 @@ export type ModelInfo = {
 	/** USD per token. */
 	promptPrice: number;
 	completionPrice: number;
+	supportsTools: boolean;
+	/** Accepts the `reasoning` request parameter. */
+	supportsReasoning: boolean;
+	reasoning?: ReasoningInfo;
+};
+
+/** One provider serving a model (an OpenRouter "endpoint"). */
+export type ProviderInfo = {
+	/** Routing slug, e.g. `deepinfra/fp8`; sent as the provider to use. */
+	slug: string;
+	name: string;
+	contextLength: number;
+	promptPrice: number;
+	completionPrice: number;
+	quantization?: string;
+	/** Share of recent requests that succeeded, 0-100, when reported. */
+	uptime?: number;
 	supportsTools: boolean;
 };
 
@@ -134,6 +153,10 @@ export async function streamChat(options: {
 	onText: (delta: string) => void;
 	/** Receives the model's thinking, for models that expose it. */
 	onReasoning?: (delta: string) => void;
+	/** The `reasoning` request field (see thinking.ts); omitted to use the model's default. */
+	reasoning?: Record<string, unknown>;
+	/** Provider slug to use exclusively; omitted to let OpenRouter choose. */
+	provider?: string;
 }): Promise<StreamResult> {
 	const res = await request(`${BASE_URL}/chat/completions`, {
 		method: 'POST',
@@ -145,6 +168,9 @@ export async function streamChat(options: {
 			tools: options.tools.length > 0 ? options.tools : undefined,
 			stream: true,
 			usage: {include: true},
+			reasoning: options.reasoning,
+			// Without fallbacks the request fails rather than silently moving to another provider.
+			provider: options.provider ? {order: [options.provider], allow_fallbacks: false} : undefined,
 		}),
 	});
 	if (!res.ok || !res.body) throw await errorFromResponse(res);
@@ -197,6 +223,12 @@ export async function listModels(apiKey: string): Promise<ModelInfo[]> {
 			context_length?: number;
 			pricing?: {prompt?: string; completion?: string};
 			supported_parameters?: string[];
+			reasoning?: {
+				supported_efforts?: string[] | null;
+				default_effort?: string;
+				mandatory?: boolean;
+				default_enabled?: boolean;
+			} | null;
 		}>;
 	};
 	return body.data
@@ -207,6 +239,50 @@ export async function listModels(apiKey: string): Promise<ModelInfo[]> {
 			promptPrice: Number(m.pricing?.prompt ?? 0),
 			completionPrice: Number(m.pricing?.completion ?? 0),
 			supportsTools: m.supported_parameters?.includes('tools') ?? false,
+			supportsReasoning: m.supported_parameters?.includes('reasoning') ?? false,
+			reasoning: m.reasoning
+				? {
+						// Keep the difference between a missing list (no effort control) and null (any effort).
+						...('supported_efforts' in m.reasoning ? {supportedEfforts: m.reasoning.supported_efforts ?? null} : {}),
+						defaultEffort: m.reasoning.default_effort,
+						mandatory: m.reasoning.mandatory,
+						defaultEnabled: m.reasoning.default_enabled,
+					}
+				: undefined,
 		}))
 		.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** Providers serving a model, cheapest first. */
+export async function listProviders(apiKey: string, modelId: string, signal?: AbortSignal): Promise<ProviderInfo[]> {
+	const res = await request(`${BASE_URL}/models/${modelId}/endpoints`, {headers: headers(apiKey), signal});
+	if (!res.ok) throw await errorFromResponse(res);
+	const body = (await res.json()) as {
+		data?: {
+			endpoints?: Array<{
+				tag?: unknown;
+				provider_name?: string;
+				name?: string;
+				context_length?: number;
+				pricing?: {prompt?: string; completion?: string};
+				quantization?: unknown;
+				uptime_last_30m?: unknown;
+				supported_parameters?: string[];
+			}>;
+		};
+	};
+	return (body.data?.endpoints ?? [])
+		.filter((e): e is typeof e & {tag: string} => typeof e.tag === 'string' && e.tag !== '')
+		.map(e => ({
+			slug: e.tag,
+			name: e.provider_name ?? e.name ?? e.tag,
+			contextLength: e.context_length ?? 0,
+			promptPrice: Number(e.pricing?.prompt ?? 0),
+			completionPrice: Number(e.pricing?.completion ?? 0),
+			quantization: typeof e.quantization === 'string' && e.quantization !== 'unknown' ? e.quantization : undefined,
+			uptime: typeof e.uptime_last_30m === 'number' ? e.uptime_last_30m : undefined,
+			// Assume tool support when a provider doesn't list its parameters.
+			supportsTools: e.supported_parameters?.includes('tools') ?? true,
+		}))
+		.sort((a, b) => a.promptPrice + a.completionPrice - (b.promptPrice + b.completionPrice));
 }

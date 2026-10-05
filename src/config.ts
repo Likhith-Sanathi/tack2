@@ -2,7 +2,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export type Config = {model?: string};
+/** Choices remembered for each model. */
+export type ModelSettings = {
+	/** Thinking level (see agent/thinking.ts); absent uses the model's default. */
+	thinking?: string;
+	/** Provider slug; absent lets OpenRouter choose. */
+	provider?: string;
+	/** Provider display name, so it can be shown without fetching the provider list. */
+	providerName?: string;
+	/** The provider's context window, when it differs from the model's. */
+	providerContext?: number;
+};
+
+export type Config = {model?: string; models?: Record<string, ModelSettings>};
 
 const dir = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'tack');
 export const configPath = path.join(dir, 'config.json');

@@ -8,7 +8,7 @@ export type SlashCommand = {
 };
 
 export const COMMANDS: SlashCommand[] = [
-	{name: '/model', description: 'Switch model (saved for next time)'},
+	{name: '/model', description: 'Switch model, thinking level and provider'},
 	{name: '/compact', description: 'Summarize the conversation to free up context'},
 	{name: '/clear', description: 'Start a new conversation'},
 	{name: '/help', description: 'Show commands and keys'},

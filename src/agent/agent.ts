@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import type {AnyTool, ToolPreview} from '../tools/index.js';
+import {reasoningParam} from './thinking.js';
 import {Permissions, type AlwaysOption, type PermissionMode, type ToolKind} from './permissions.js';
 import {ApiError, streamChat, type ChatMessage, type StreamResult, type ToolCall, type ToolSpec, type Usage} from './openrouter.js';
 
@@ -121,6 +122,10 @@ export class Agent {
 	model: string;
 	/** The current model's context window in tokens, if known. Enables automatic compaction. */
 	contextLength: number | undefined;
+	/** Thinking level for the model (see thinking.ts); undefined uses the model's default. */
+	thinking: string | undefined;
+	/** Provider slug to route to; undefined lets OpenRouter choose. */
+	provider: string | undefined;
 	private messages: ChatMessage[];
 	private summary = '';
 	/** Prompt tokens reported for the last request, and how many messages it contained. */
@@ -266,6 +271,8 @@ export class Agent {
 				const result = await streamChat({
 					apiKey: this.options.apiKey,
 					model: this.model,
+					reasoning: reasoningParam(this.thinking),
+					provider: this.provider,
 					messages: this.requestMessages(),
 					tools,
 					signal,
@@ -342,6 +349,7 @@ export class Agent {
 		const result = await streamChat({
 			apiKey: this.options.apiKey,
 			model: this.model,
+			provider: this.provider,
 			messages: [
 				{role: 'system', content: SUMMARY_PROMPT},
 				{role: 'user', content: text},

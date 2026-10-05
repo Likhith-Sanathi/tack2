@@ -192,9 +192,11 @@ export function useAgent(options: {apiKey: string; model: string; cwd: string; p
 	}, [agent]);
 
 	const setModel = useCallback(
-		(model: string, contextLength: number | undefined) => {
+		(model: string, contextLength: number | undefined, thinking?: string, provider?: string) => {
 			agent.model = model;
 			agent.contextLength = contextLength;
+			agent.thinking = thinking;
+			agent.provider = provider;
 		},
 		[agent],
 	);

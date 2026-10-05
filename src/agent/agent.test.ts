@@ -11,7 +11,7 @@ import type {AgentEvent, ApprovalRequest} from './agent.js';
 type Reply = {text?: string; call?: {name: string; args: unknown}};
 
 let replies: Reply[] = [];
-let requests: Array<{messages: Array<{role: string; content: string | null}>}> = [];
+let requests: Array<{messages: Array<{role: string; content: string | null}>; reasoning?: unknown; provider?: unknown}> = [];
 let server: http.Server;
 let Agent: typeof import('./agent.js').Agent;
 let tools: typeof import('../tools/index.js').tools;
@@ -142,4 +142,17 @@ test('read-only commands run without asking in ask mode', async () => {
 	await agent.send('list');
 	assert.equal(approvals.length, 0);
 	assert.equal(toolEnds()[0]?.type === 'tool_end' && toolEnds()[0]!.status, 'ok');
+});
+
+test('sends the thinking level and pinned provider, and omits them by default', async () => {
+	const {agent} = setup();
+	replies = [{text: 'ok'}, {text: 'ok'}];
+	await agent.send('hi');
+	assert.equal(requests[0]!.reasoning, undefined);
+	assert.equal(requests[0]!.provider, undefined);
+	agent.thinking = 'high';
+	agent.provider = 'deepinfra/fp8';
+	await agent.send('again');
+	assert.deepEqual(requests[1]!.reasoning, {effort: 'high'});
+	assert.deepEqual(requests[1]!.provider, {order: ['deepinfra/fp8'], allow_fallbacks: false});
 });

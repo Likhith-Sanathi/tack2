@@ -1,10 +1,11 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Box, Static, useApp, useInput, useWindowSize} from 'ink';
-import {listModels, type ModelInfo, type Usage} from '../agent/openrouter.js';
-import {loadConfig, loadHistory, saveConfig, saveHistory} from '../config.js';
+import {listModels, listProviders, type ModelInfo, type Usage} from '../agent/openrouter.js';
+import {thinkingLabel} from '../agent/thinking.js';
+import {loadConfig, loadHistory, saveConfig, saveHistory, type ModelSettings} from '../config.js';
 import {ChatItemView} from './chat-item.js';
 import {ApprovalPrompt} from './approval-prompt.js';
-import {ModelPicker} from './model-picker.js';
+import {ModelPicker, type ModelChoice} from './model-picker.js';
 import {StatusBar, type Activity} from './status-bar.js';
 import {PromptInput, type PromptInputHandle} from './prompt-input.js';
 import {useAgent} from './use-agent.js';
@@ -17,6 +18,15 @@ const HELP = [
 	'      Esc interrupts the agent · Ctrl+C interrupts, clears the input, or quits when idle',
 ].join('\n');
 
+/** e.g. `anthropic/claude-x (high, via Anthropic)`. */
+function modelLabel(model: string, settings: ModelSettings): string {
+	const details = [
+		settings.thinking ? thinkingLabel(settings.thinking) : '',
+		settings.providerName ? `via ${settings.providerName}` : '',
+	].filter(Boolean);
+	return details.length > 0 ? `${model} (${details.join(', ')})` : model;
+}
+
 export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; initialModel?: string}) {
 	const {exit} = useApp();
 	const {columns, rows} = useWindowSize();
@@ -24,6 +34,8 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const [picking, setPicking] = useState(!initialModel);
 	const [models, setModels] = useState<ModelInfo[] | null>(null);
 	const [modelsError, setModelsError] = useState<string | null>(null);
+	/** Thinking and provider choices remembered per model. */
+	const [savedSettings, setSavedSettings] = useState<Record<string, ModelSettings>>(() => loadConfig().models ?? {});
 	const [history, setHistory] = useState(loadHistory);
 	const [draftLines, setDraftLines] = useState(1);
 	// Rows the slash-command menu takes under the input (commands, margin and hint line).
@@ -37,26 +49,33 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	}, [apiKey]);
 
 	const modelInfo = models?.find(m => m.id === model);
+	const settings: ModelSettings = (model && savedSettings[model]) || {};
+	// A pinned provider may offer a smaller context window than the model's maximum.
+	const contextLength = settings.providerContext ?? modelInfo?.contextLength;
 	const priceUsage = (u: Usage) =>
 		modelInfo ? u.prompt_tokens * modelInfo.promptPrice + u.completion_tokens * modelInfo.completionPrice : 0;
 	const agent = useAgent({apiKey, cwd, model: model ?? '', priceUsage});
 	const {setModel: setAgentModel} = agent;
 
-	// Keep the agent's model and context window in sync (the model list may load after startup).
+	// Keep the agent's model, context window, thinking and provider in sync (the model list may load
+	// after startup).
 	useEffect(() => {
-		if (model) setAgentModel(model, modelInfo?.contextLength);
-	}, [model, modelInfo?.contextLength, setAgentModel]);
+		if (model) setAgentModel(model, contextLength, settings.thinking, settings.provider);
+	}, [model, contextLength, settings.thinking, settings.provider, setAgentModel]);
 
 	const chooseModel = useCallback(
-		(id: string) => {
+		({model: id, settings: chosen}: ModelChoice) => {
 			setModel(id);
+			setSavedSettings(prev => ({...prev, [id]: chosen}));
 			setPicking(false);
 			try {
-				saveConfig({...loadConfig(), model: id});
+				const config = loadConfig();
+				saveConfig({...config, model: id, models: {...config.models, [id]: chosen}});
 			} catch (error) {
 				agent.addNotice(`Could not save config: ${(error as Error).message}`, 'error');
 			}
-			agent.addNotice(`Model: ${id}`);
+			const thinking = chosen.thinking ? thinkingLabel(chosen.thinking) : 'model default';
+			agent.addNotice(`Model: ${id} · thinking: ${thinking} · provider: ${chosen.providerName ?? 'auto'}`);
 		},
 		[agent],
 	);
@@ -65,8 +84,8 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 		if (key.tab && key.shift) {
 			agent.cycleMode();
 		} else if (key.escape) {
+			// The model picker handles Esc itself (back a step, or cancel).
 			if (agent.running) agent.interrupt();
-			else if (picking && model) setPicking(false);
 		} else if (key.ctrl && char === 'c') {
 			if (agent.running) agent.interrupt();
 			else if (draft.current) input.current?.clear();
@@ -159,7 +178,18 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 			{agent.approval ? (
 				<ApprovalPrompt approval={agent.approval} rows={rows} columns={columns} />
 			) : (
-				picking && <ModelPicker rows={rows} models={models} error={modelsError} current={model} onSelect={chooseModel} />
+				picking && (
+					<ModelPicker
+						rows={rows}
+						models={models}
+						error={modelsError}
+						current={model}
+						saved={savedSettings}
+						loadProviders={(id, signal) => listProviders(apiKey, id, signal)}
+						onSelect={chooseModel}
+						onCancel={model ? () => setPicking(false) : undefined}
+					/>
+				)
 			)}
 			{/* Stays mounted while hidden so a draft survives approval prompts and the model picker. */}
 			<Box display={inputActive ? 'flex' : 'none'} flexDirection="column">
@@ -181,11 +211,11 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 				/>
 			</Box>
 			<StatusBar
-				model={model}
+				model={model && modelLabel(model, settings)}
 				activity={activity}
 				mode={agent.mode}
 				usage={agent.usage}
-				contextLength={modelInfo?.contextLength}
+				contextLength={contextLength}
 			/>
 		</Box>
 	);
