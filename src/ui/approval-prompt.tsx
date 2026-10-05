@@ -36,7 +36,7 @@ export function ApprovalPrompt({approval, rows, columns}: {approval: PendingAppr
 	];
 	const textLines = preview?.type === 'text' ? preview.text.split('\n') : [];
 	return (
-		<Box flexDirection="column" backgroundColor="gray" paddingX={1} paddingY={1} marginTop={1}>
+		<Box flexDirection="column" backgroundColor="black" paddingX={1} paddingY={1} marginTop={1}>
 			<Text>
 				Allow <Text bold color="yellow">{approval.toolName}</Text>?
 			</Text>

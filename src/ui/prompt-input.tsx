@@ -209,7 +209,7 @@ export function PromptInput({ref, placeholder, accentColor, canSubmit, isActive,
 					<Text dimColor>{'  ↑/↓ select · Tab complete · Enter run · Esc close'}</Text>
 				</Box>
 			)}
-			<Box flexDirection="column" backgroundColor="gray" paddingX={1} paddingY={1} marginTop={menuOpen ? 0 : 1}>
+			<Box flexDirection="column" backgroundColor="black" paddingX={1} paddingY={1} marginTop={menuOpen ? 0 : 1}>
 				{first > 0 && <Text dimColor>{`  ↑ ${first} more line${first === 1 ? '' : 's'}`}</Text>}
 				{shown.map((line, i) => {
 					const row = first + i;
