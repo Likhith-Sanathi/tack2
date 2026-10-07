@@ -183,7 +183,9 @@ export function App({apiKey, cwd, initialModel}: {apiKey: string; cwd: string; i
 	const inputRows = Math.min(draftLines, maxInputLines) + (draftLines > maxInputLines ? 2 : 0) + menuRows;
 
 	// Finished items are printed once via <Static>; only the in-progress tail re-renders.
-	const firstLive = agent.items.findIndex(
+	// Nothing is in progress while the agent is idle, so then everything is final, even an item that
+	// was somehow left open.
+	const firstLive = !agent.running ? -1 : agent.items.findIndex(
 		item =>
 			(item.kind === 'assistant' && !item.done) ||
 			(item.kind === 'thinking' && item.seconds === undefined) ||

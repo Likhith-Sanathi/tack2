@@ -42,7 +42,8 @@ function closeThinking(items: ChatItem[]): ChatItem[] {
 	return [...items.slice(0, -1), {...last, seconds: Math.max(1, Math.round((Date.now() - last.startedAt) / 1000))}];
 }
 
-function applyEvent(current: ChatItem[], event: AgentEvent): ChatItem[] {
+/** Folds one agent event into the chat items. Exported for tests. */
+export function applyEvent(current: ChatItem[], event: AgentEvent): ChatItem[] {
 	if (event.type === 'reasoning') {
 		const last = current.at(-1);
 		if (last?.kind === 'thinking' && last.seconds === undefined) {
@@ -68,9 +69,13 @@ function applyEvent(current: ChatItem[], event: AgentEvent): ChatItem[] {
 			}
 			return [...items, {id: nextId++, kind: 'assistant', text: event.delta, done: false}];
 		case 'assistant_done':
-			if (last?.kind !== 'assistant' || last.done) return items;
-			if (last.text.trim() === '') return items.slice(0, -1);
-			return [...items.slice(0, -1), {...last, done: true}];
+			// A response can interleave text and reasoning (e.g. a newline, then thinking, then the
+			// answer), which splits its text over several items. Finish all of them, not just the last:
+			// an item left open would keep everything after it in the live area, which then outgrows the
+			// terminal. Items holding only whitespace are dropped.
+			return items.flatMap(item =>
+				item.kind !== 'assistant' || item.done ? [item] : item.text.trim() === '' ? [] : [{...item, done: true}],
+			);
 		case 'tool_start':
 			return [
 				...items,
